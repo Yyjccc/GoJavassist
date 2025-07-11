@@ -1,9 +1,9 @@
 package compiler
 
 import (
-	"GoJavassist/classfile"
-	"GoJavassist/compiler/reflect"
 	"fmt"
+	"github.com/Yyjccc/GoJavassist/classfile"
+	"github.com/Yyjccc/GoJavassist/compiler/reflect"
 
 	"io/ioutil"
 	"testing"

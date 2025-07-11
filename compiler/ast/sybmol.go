@@ -1,7 +1,7 @@
 package ast
 
 import (
-	"GoJavassist/compiler/reflect"
+	"github.com/Yyjccc/GoJavassist/compiler/reflect"
 )
 
 type Symbol struct {

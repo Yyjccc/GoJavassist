@@ -1,8 +1,8 @@
 package ast
 
 import (
-	"GoJavassist/compiler/reflect"
 	"fmt"
+	"github.com/Yyjccc/GoJavassist/compiler/reflect"
 	"strconv"
 )
 
