@@ -1,9 +1,9 @@
 package reflect
 
 import (
-	"GoJavassist/classfile"
 	"archive/zip"
 	"bytes"
+	"github.com/Yyjccc/GoJavassist/classfile"
 	"os"
 	"path/filepath"
 

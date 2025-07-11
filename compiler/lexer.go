@@ -1,7 +1,7 @@
 package compiler
 
 import (
-	"GoJavassist/compiler/ast"
+	"github.com/Yyjccc/GoJavassist/compiler/ast"
 	"strings"
 	"unicode"
 )

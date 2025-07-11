@@ -1,6 +1,6 @@
 package compiler
 
-import "GoJavassist/compiler/ast"
+import "github.com/Yyjccc/GoJavassist/compiler/ast"
 
 // SymbolTable 表示符号表，内部保存一个 map 以及父符号表引用
 type SymbolTable struct {

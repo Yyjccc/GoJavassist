@@ -1,8 +1,8 @@
 package compiler
 
 import (
-	"GoJavassist/classfile"
-	"GoJavassist/compiler/ast"
+	"github.com/Yyjccc/GoJavassist/classfile"
+	"github.com/Yyjccc/GoJavassist/compiler/ast"
 )
 
 type ProceedHandler interface {

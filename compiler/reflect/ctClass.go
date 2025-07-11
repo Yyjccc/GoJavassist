@@ -1,8 +1,8 @@
 package reflect
 
 import (
-	"GoJavassist/classfile"
 	"fmt"
+	"github.com/Yyjccc/GoJavassist/classfile"
 	"strings"
 )
 

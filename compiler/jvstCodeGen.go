@@ -1,9 +1,9 @@
 package compiler
 
 import (
-	"GoJavassist/classfile"
-	"GoJavassist/compiler/ast"
-	"GoJavassist/compiler/reflect"
+	"github.com/Yyjccc/GoJavassist/classfile"
+	"github.com/Yyjccc/GoJavassist/compiler/ast"
+	"github.com/Yyjccc/GoJavassist/compiler/reflect"
 	"strconv"
 )
 

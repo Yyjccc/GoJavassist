@@ -1,9 +1,9 @@
 package bytecodes
 
 import (
-	"GoJavassist/classfile"
-	"GoJavassist/compiler"
-	"GoJavassist/compiler/reflect"
+	"github.com/Yyjccc/GoJavassist/classfile"
+	"github.com/Yyjccc/GoJavassist/compiler"
+	"github.com/Yyjccc/GoJavassist/compiler/reflect"
 )
 
 type MethodVisitor struct {

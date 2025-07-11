@@ -1,6 +1,6 @@
 package compiler
 
-import "GoJavassist/compiler/ast"
+import "github.com/Yyjccc/GoJavassist/compiler/ast"
 
 type CompileError struct {
 	error

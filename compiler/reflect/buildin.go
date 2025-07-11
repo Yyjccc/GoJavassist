@@ -1,7 +1,7 @@
 package reflect
 
 import (
-	"GoJavassist/classfile"
+	"github.com/Yyjccc/GoJavassist/classfile"
 )
 
 const (

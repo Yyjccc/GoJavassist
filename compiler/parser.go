@@ -1,9 +1,9 @@
 package compiler
 
 import (
-	"GoJavassist/compiler/ast"
 	"errors"
 	"fmt"
+	"github.com/Yyjccc/GoJavassist/compiler/ast"
 	"strconv"
 	"strings"
 )

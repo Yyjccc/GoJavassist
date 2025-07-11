@@ -1,8 +1,8 @@
 package compiler
 
 import (
-	"GoJavassist/classfile"
-	"GoJavassist/compiler/reflect"
+	"github.com/Yyjccc/GoJavassist/classfile"
+	"github.com/Yyjccc/GoJavassist/compiler/reflect"
 )
 
 type Int = int32

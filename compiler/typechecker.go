@@ -1,10 +1,10 @@
 package compiler
 
 import (
-	"GoJavassist/compiler/ast"
-	"GoJavassist/compiler/reflect"
 	"errors"
 	"fmt"
+	"github.com/Yyjccc/GoJavassist/compiler/ast"
+	"github.com/Yyjccc/GoJavassist/compiler/reflect"
 	"strings"
 )
 
