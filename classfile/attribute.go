@@ -1,0 +1,640 @@
+package classfile
+
+import (
+	"bytes"
+	"fmt"
+	"reflect"
+)
+
+/*
+	attribute_info {
+	    u2 attribute_name_index;
+	    u4 attribute_length;
+	    u1 info[attribute_length];
+	}
+*/
+
+// Predefined class file attributes
+const (
+	ConstantValue                       = "ConstantValue"                        //	1.0.2
+	Code                                = "Code"                                 //	1.0.2
+	Exceptions                          = "Exceptions"                           //	1.0.2
+	SourceFile                          = "SourceFile"                           //	1.0.2
+	LineNumberTable                     = "LineNumberTable"                      //	1.0.2
+	LocalVariableTable                  = "LocalVariableTable"                   //	1.0.2
+	InnerClasses                        = "InnerClasses"                         //	1.1
+	Synthetic                           = "Synthetic"                            //	1.1
+	Deprecated                          = "Deprecated"                           //	1.1
+	EnclosingMethod                     = "EnclosingMethod"                      //	5.0
+	Signature                           = "Signature"                            //	5.0
+	SourceDebugExtension                = "SourceDebugExtension"                 //	5.0
+	LocalVariableTypeTable              = "LocalVariableTypeTable"               //	5.0
+	RuntimeVisibleAnnotations           = "RuntimeVisibleAnnotations"            //	5.0
+	RuntimeInvisibleAnnotations         = "RuntimeInvisibleAnnotations"          //	5.0
+	RuntimeVisibleParameterAnnotations  = "RuntimeVisibleParameterAnnotations"   //	5.0
+	RuntimeInvisibleParameterAnnotation = "RuntimeInvisibleParameterAnnotations" //	5.0
+	AnnotationDefault                   = "AnnotationDefault"                    //	5.0
+	StackMapTable                       = "StackMapTable"                        //	6
+	BootstrapMethods                    = "BootstrapMethods"                     //	7
+	RuntimeVisibleTypeAnnotations       = "RuntimeVisibleTypeAnnotations"        //	8
+	RuntimeInvisibleTypeAnnotations     = "RuntimeInvisibleTypeAnnotations"      //	8
+	MethodParameters                    = "MethodParameters"                     //	8
+	Module                              = "Module"                               // 9
+	ModulePackages                      = "ModulePackages"                       // 9
+	ModuleMainClass                     = "ModuleMainClass"                      // 9
+	NestHost                            = "NestHost"                             // 11
+	NestMembers                         = "NestMembers"                          // 11
+)
+
+type AttributeInfo interface{}
+
+type UnparsedAttribute struct {
+	Name   string
+	Length uint32
+	Info   []byte
+}
+
+type MarkerAttribute struct{}
+
+/*
+	Deprecated_attribute {
+	    u2 attribute_name_index;
+	    u4 attribute_length;
+	}
+*/
+type DeprecatedAttribute struct {
+	MarkerAttribute
+}
+
+/*
+	Synthetic_attribute {
+	    u2 attribute_name_index;
+	    u4 attribute_length;
+	}
+*/
+type SyntheticAttribute struct {
+	MarkerAttribute
+}
+
+func writeUnparsedAttribute(writer *ClassWriter, attr UnparsedAttribute) []byte {
+	var buf bytes.Buffer
+	nameIndex := writer.cf.GetConstStrIndex(attr.Name)
+	buf.Write([]byte{byte(nameIndex >> 8), byte(nameIndex)})                                                       // 属性名称索引
+	buf.Write([]byte{byte(attr.Length >> 24), byte(attr.Length >> 16), byte(attr.Length >> 8), byte(attr.Length)}) // 属性长度
+	buf.Write(attr.Info)                                                                                           // 属性信息
+	return buf.Bytes()                                                                                             // 返回字节切片
+}
+
+func readAttributes(reader *ClassReader) []AttributeInfo {
+	return reader.readTable(readAttributeInfo).([]AttributeInfo)
+}
+
+func writeMarkerAttribute(attr MarkerAttribute, attributeIndex uint16) []byte {
+	var buf bytes.Buffer
+	buf.Write([]byte{byte(attributeIndex >> 8), byte(attributeIndex)}) // 属性名称索引
+	buf.Write([]byte{0, 0, 0, 0})                                      // 属性长度为0
+	return buf.Bytes()                                                 // 返回字节切片
+}
+
+func writeDeprecatedAttribute(attr DeprecatedAttribute) []byte {
+	const DeprecatedIndex = 0x0001                                     // 示例索引值
+	return writeMarkerAttribute(attr.MarkerAttribute, DeprecatedIndex) // 返回字节切片
+}
+
+func writeSyntheticAttribute(attr SyntheticAttribute) []byte {
+	const SyntheticIndex = 0x0002                                     // 示例索引值
+	return writeMarkerAttribute(attr.MarkerAttribute, SyntheticIndex) // 返回字节切片
+}
+
+func readAttributeInfo(reader *ClassReader) AttributeInfo {
+	attrNameIndex := reader.ReadUint16()
+	attrLen := reader.ReadUint32()
+	attrName := reader.cf.GetRawUTF8(attrNameIndex)
+
+	switch attrName {
+	// case AnnotationDefault:
+	case BootstrapMethods:
+		return readBootstrapMethodsAttribute(reader)
+	case Code:
+		return readCodeAttribute(reader)
+	case ConstantValue:
+		return readConstantValueAttribute(reader)
+	case Deprecated:
+		return DeprecatedAttribute{}
+	case EnclosingMethod:
+		return readEnclosingMethodAttribute(reader)
+	case Exceptions:
+		return readExceptionsAttribute(reader)
+	case InnerClasses:
+		return readInnerClassesAttribute(reader)
+	case LineNumberTable:
+		return readLineNumberTableAttribute(reader)
+	case LocalVariableTable:
+		return readLocalVariableTableAttribute(reader)
+	case LocalVariableTypeTable:
+		return readLocalVariableTypeTableAttribute(reader)
+	// case MethodParameters:
+	case Module:
+		return readModuleAttribute(reader)
+	// case RuntimeInvisibleAnnotations:
+	// case RuntimeInvisibleParameterAnnotations:
+	// case RuntimeInvisibleTypeAnnotations:
+	// case RuntimeVisibleAnnotations:
+	// case RuntimeVisibleParameterAnnotations:
+	// case RuntimeVisibleTypeAnnotations:
+	case Signature:
+		return readSignatureAttribute(reader)
+	case SourceFile:
+		return readSourceFileAttribute(reader)
+	// case SourceDebugExtension:
+	// case StackMapTable:
+	case Synthetic:
+		return SyntheticAttribute{}
+	default:
+		// undefined attr
+		//println("unknown attribute: " + attrName)
+		return UnparsedAttribute{
+			Name:   attrName,
+			Length: attrLen,
+			Info:   reader.ReadBytes(int(attrLen)),
+		}
+	}
+}
+
+type AttributeTable []AttributeInfo
+
+/* group 1 */
+
+func (at AttributeTable) GetCodeAttribute() (CodeAttribute, bool) {
+	for _, attrInfo := range at {
+		if a, ok := attrInfo.(CodeAttribute); ok {
+			return a, true
+		}
+	}
+	return CodeAttribute{}, false
+}
+
+func (at AttributeTable) GetConstantValueIndex() uint16 {
+	for _, attrInfo := range at {
+		if a, ok := attrInfo.(ConstantValueAttribute); ok {
+			return a.ConstantValueIndex
+		}
+	}
+	return 0
+}
+
+func (at AttributeTable) GetExceptionIndexTable() []uint16 {
+	for _, attrInfo := range at {
+		if a, ok := attrInfo.(ExceptionsAttribute); ok {
+			return a.ExceptionIndexTable
+		}
+	}
+	return nil
+}
+
+func (at AttributeTable) GetBootstrapMethods() []BootstrapMethod {
+	for _, attrInfo := range at {
+		if a, ok := attrInfo.(BootstrapMethodsAttribute); ok {
+			return a.BootstrapMethods
+		}
+	}
+	return nil
+}
+
+/* group 2 */
+
+func (at AttributeTable) GetEnclosingMethodAttribute() (EnclosingMethodAttribute, bool) {
+	for _, attrInfo := range at {
+		if a, ok := attrInfo.(EnclosingMethodAttribute); ok {
+			return a, true
+		}
+	}
+	return EnclosingMethodAttribute{}, false
+}
+
+func (at AttributeTable) GetSignatureIndex() uint16 {
+	for _, attrInfo := range at {
+		if a, ok := attrInfo.(SignatureAttribute); ok {
+			return a.SignatureIndex
+		}
+	}
+	return 0
+}
+
+/* group 3 */
+
+func (at AttributeTable) GetSourceFileIndex() uint16 {
+	for _, attrInfo := range at {
+		if a, ok := attrInfo.(SourceFileAttribute); ok {
+			return a.SourceFileIndex
+		}
+	}
+	return 0
+}
+
+func (at AttributeTable) GetLineNumberTable() []LineNumberTableEntry {
+	for _, attrInfo := range at {
+		if a, ok := attrInfo.(LineNumberTableAttribute); ok {
+			return a.LineNumberTable
+		}
+	}
+	return nil
+}
+
+func (at AttributeTable) GetModuleAttribute() (ModuleAttribute, bool) {
+	for _, attrInfo := range at {
+		if a, ok := attrInfo.(ModuleAttribute); ok {
+			return a, true
+		}
+	}
+	return ModuleAttribute{}, false
+}
+
+/* unparsed */
+
+func (at AttributeTable) GetRuntimeVisibleAnnotationsAttributeData() []byte {
+	return at.getUnparsedAttributeData(RuntimeVisibleAnnotations)
+}
+func (at AttributeTable) GetRuntimeVisibleParameterAnnotationsAttributeData() []byte {
+	return at.getUnparsedAttributeData(RuntimeVisibleParameterAnnotations)
+}
+func (at AttributeTable) GetAnnotationDefaultAttributeData() []byte {
+	return at.getUnparsedAttributeData(AnnotationDefault)
+}
+
+func (at AttributeTable) getUnparsedAttributeData(name string) []byte {
+	for _, attrInfo := range at {
+		if a, ok := attrInfo.(UnparsedAttribute); ok && a.Name == name {
+			return a.Info
+		}
+	}
+	return nil
+}
+
+func (at AttributeTable) Remove(tag string) {
+	//TODO
+
+	for i, attrInfo := range at {
+		if _, ok := attrInfo.(*ExceptionsAttribute); ok {
+			if tag == Exceptions {
+				at = append(at[:i], at[i+1:]...)
+			}
+		}
+	}
+}
+
+/*
+	Code_attribute {
+	    u2 attribute_name_index;
+	    u4 attribute_length;
+	    u2 max_stack;
+	    u2 max_locals;
+	    u4 code_length;
+	    u1 code[code_length];
+	    u2 exception_table_length;
+	    {   u2 start_pc;
+	        u2 end_pc;
+	        u2 handler_pc;
+	        u2 catch_type;
+	    } exception_table[exception_table_length];
+	    u2 attributes_count;
+	    attribute_info attributes[attributes_count];
+	}
+*/
+type CodeAttribute struct {
+	MaxStack       uint16
+	MaxLocals      uint16
+	Code           []byte
+	ExceptionTable []ExceptionTableEntry
+	AttributeTable
+}
+
+func (a *CodeAttribute) GetAttribute(s string) interface{} {
+	for _, attrInfo := range a.AttributeTable {
+		switch s {
+		case LocalVariableTable:
+			if localVTable, ok := attrInfo.(LocalVariableTableAttribute); ok {
+				return &localVTable
+			}
+		}
+
+	}
+	return nil
+}
+
+func (a *CodeAttribute) GetCodeLength() uint16 {
+	return uint16(len(a.Code))
+}
+
+func (a *CodeAttribute) InsertLocalVar(where bool, size int) {
+	//TODO
+	a.MaxLocals = a.MaxLocals + uint16(size)
+}
+
+type ExceptionTableEntry struct {
+	StartPc   uint16
+	EndPc     uint16
+	HandlerPc uint16
+	CatchType uint16
+}
+
+func readCodeAttribute(reader *ClassReader) CodeAttribute {
+	return CodeAttribute{
+		MaxStack:       reader.ReadUint16(),
+		MaxLocals:      reader.ReadUint16(),
+		Code:           reader.ReadBytes(int(reader.ReadUint32())),
+		ExceptionTable: readExceptionTable(reader),
+		AttributeTable: readAttributes(reader),
+	}
+}
+
+func writeCodeAttribute(writer *ClassWriter, attribute CodeAttribute) []byte {
+	var buf bytes.Buffer
+	// 计算 CodeAttribute 的长度
+	//totalLength := uint32(2 + 2 + 4 + uint32(len(attribute.Code)) + 2) // MaxStack + MaxLocals + Code Length + exception_table_length
+	// 计算附加属性的长度
+	attachAttr := writeAttributes(writer, attribute.AttributeTable)
+	exceptionTable := writeExceptionTable(attribute.ExceptionTable)
+	//totalLength += uint32(len(exceptionTable))
+	//totalLength += uint32(len(attachAttr))
+	//写入名称和长度
+	//writeAttributeNameAndLength(writer, &buf, Code, totalLength)
+	buf.Write([]byte{byte(attribute.MaxStack >> 8), byte(attribute.MaxStack)})                                                                     // MaxStack
+	buf.Write([]byte{byte(attribute.MaxLocals >> 8), byte(attribute.MaxLocals)})                                                                   // MaxLocals
+	buf.Write([]byte{byte(len(attribute.Code) >> 24), byte(len(attribute.Code) >> 16), byte(len(attribute.Code) >> 8), byte(len(attribute.Code))}) // Code Length
+	buf.Write(attribute.Code)
+	buf.Write(exceptionTable) // 使用返回的字节切片
+	buf.Write(attachAttr)     // 使用返回的字节切片
+	return buf.Bytes()        // 返回字节切片
+}
+
+func readExceptionTable(reader *ClassReader) []ExceptionTableEntry {
+	return reader.readTable(func(reader *ClassReader) ExceptionTableEntry {
+		return ExceptionTableEntry{
+			StartPc:   reader.ReadUint16(),
+			EndPc:     reader.ReadUint16(),
+			HandlerPc: reader.ReadUint16(),
+			CatchType: reader.ReadUint16(),
+		}
+	}).([]ExceptionTableEntry)
+}
+
+func writeExceptionTable(table []ExceptionTableEntry) []byte {
+	var buf bytes.Buffer
+	buf.Write([]byte{byte(len(table) >> 8), byte(len(table))}) // exception_table_length
+	for _, entry := range table {
+		buf.Write([]byte{byte(entry.StartPc >> 8), byte(entry.StartPc)})
+		buf.Write([]byte{byte(entry.EndPc >> 8), byte(entry.EndPc)})
+		buf.Write([]byte{byte(entry.HandlerPc >> 8), byte(entry.HandlerPc)})
+		buf.Write([]byte{byte(entry.CatchType >> 8), byte(entry.CatchType)})
+	}
+	return buf.Bytes() // 返回字节切片
+}
+
+//行号
+/*
+LineNumberTable_attribute {
+    u2 attribute_name_index;
+    u4 attribute_length;
+    u2 line_number_table_length;
+    {   u2 start_pc;
+        u2 line_number;
+    } line_number_table[line_number_table_length];
+}
+*/
+type LineNumberTableAttribute struct {
+	LineNumberTable []LineNumberTableEntry
+}
+
+type LineNumberTableEntry struct {
+	StartPC    uint16
+	LineNumber uint16
+}
+
+func readLineNumberTableAttribute(reader *ClassReader) LineNumberTableAttribute {
+	return LineNumberTableAttribute{
+		LineNumberTable: reader.readTable(func(reader *ClassReader) LineNumberTableEntry {
+			return LineNumberTableEntry{
+				StartPC:    reader.ReadUint16(),
+				LineNumber: reader.ReadUint16(),
+			}
+		}).([]LineNumberTableEntry),
+	}
+}
+
+func writeLineNumberTableAttribute(attribute LineNumberTableAttribute) []byte {
+	var buf bytes.Buffer
+	buf.Write([]byte{byte(len(attribute.LineNumberTable) >> 8), byte(len(attribute.LineNumberTable))}) // line_number_table_length
+	for _, entry := range attribute.LineNumberTable {
+		buf.Write([]byte{byte(entry.StartPC >> 8), byte(entry.StartPC)})
+		buf.Write([]byte{byte(entry.LineNumber >> 8), byte(entry.LineNumber)})
+	}
+	return buf.Bytes() // 返回字节切片
+}
+
+/*
+	BootstrapMethods_attribute {
+	    u2 attribute_name_index;
+	    u4 attribute_length;
+	    u2 num_bootstrap_methods;
+	    {   u2 bootstrap_method_ref;
+	        u2 num_bootstrap_arguments;
+	        u2 bootstrap_arguments[num_bootstrap_arguments];
+	    } bootstrap_methods[num_bootstrap_methods];
+	}
+*/
+type BootstrapMethodsAttribute struct {
+	BootstrapMethods []BootstrapMethod
+}
+
+type BootstrapMethod struct {
+	BootstrapMethodRef uint16
+	BootstrapArguments []uint16
+}
+
+func readBootstrapMethodsAttribute(reader *ClassReader) BootstrapMethodsAttribute {
+	return BootstrapMethodsAttribute{
+		BootstrapMethods: reader.readTable(func(reader *ClassReader) BootstrapMethod {
+			return BootstrapMethod{
+				BootstrapMethodRef: reader.ReadUint16(),
+				BootstrapArguments: reader.readUint16s(),
+			}
+		}).([]BootstrapMethod),
+	}
+}
+
+func writeBootstrapMethodsAttribute(attribute BootstrapMethodsAttribute) []byte {
+	var buf bytes.Buffer
+	buf.Write([]byte{byte(len(attribute.BootstrapMethods) >> 8), byte(len(attribute.BootstrapMethods))}) // num_bootstrap_methods
+	for _, method := range attribute.BootstrapMethods {
+		buf.Write([]byte{byte(method.BootstrapMethodRef >> 8), byte(method.BootstrapMethodRef)})           // BootstrapMethodRef
+		buf.Write([]byte{byte(len(method.BootstrapArguments) >> 8), byte(len(method.BootstrapArguments))}) // num_bootstrap_arguments
+
+		// 将 BootstrapArguments 转换为 []byte
+		for _, arg := range method.BootstrapArguments {
+			buf.Write([]byte{byte(arg >> 8), byte(arg)}) // 将每个 uint16 转换为两个字节
+		}
+	}
+	return buf.Bytes() // 返回字节切片
+}
+
+//内部类描述符
+
+/*
+	InnerClasses_attribute {
+	    u2 attribute_name_index;
+	    u4 attribute_length;
+	    u2 number_of_classes;
+	    {   u2 inner_class_info_index;
+	        u2 outer_class_info_index;
+	        u2 inner_name_index;
+	        u2 inner_class_access_flags;
+	    } classes[number_of_classes];
+	}
+*/
+type InnerClassesAttribute struct {
+	Classes []InnerClassInfo
+}
+
+type InnerClassInfo struct {
+	InnerClassInfoIndex   uint16
+	OuterClassInfoIndex   uint16
+	InnerNameIndex        uint16
+	InnerClassAccessFlags uint16
+}
+
+func readInnerClassesAttribute(reader *ClassReader) InnerClassesAttribute {
+	return InnerClassesAttribute{
+		Classes: reader.readTable(func(reader *ClassReader) InnerClassInfo {
+			return InnerClassInfo{
+				InnerClassInfoIndex:   reader.ReadUint16(),
+				OuterClassInfoIndex:   reader.ReadUint16(),
+				InnerNameIndex:        reader.ReadUint16(),
+				InnerClassAccessFlags: reader.ReadUint16(),
+			}
+		}).([]InnerClassInfo),
+	}
+}
+
+func writeInnerClassesAttribute(attribute InnerClassesAttribute) []byte {
+	var buf bytes.Buffer
+	buf.Write([]byte{byte(len(attribute.Classes) >> 8), byte(len(attribute.Classes))}) // number_of_classes
+	for _, classInfo := range attribute.Classes {
+		buf.Write([]byte{byte(classInfo.InnerClassInfoIndex >> 8), byte(classInfo.InnerClassInfoIndex)})
+		buf.Write([]byte{byte(classInfo.OuterClassInfoIndex >> 8), byte(classInfo.OuterClassInfoIndex)})
+		buf.Write([]byte{byte(classInfo.InnerNameIndex >> 8), byte(classInfo.InnerNameIndex)})
+		buf.Write([]byte{byte(classInfo.InnerClassAccessFlags >> 8), byte(classInfo.InnerClassAccessFlags)})
+	}
+	return buf.Bytes() // 返回字节切片
+}
+
+/*
+	Exceptions_attribute {
+	    u2 attribute_name_index;
+	    u4 attribute_length;
+	    u2 number_of_exceptions;
+	    u2 exception_index_table[number_of_exceptions];
+	}
+*/
+type ExceptionsAttribute struct {
+	ExceptionIndexTable []uint16
+}
+
+func readExceptionsAttribute(reader *ClassReader) ExceptionsAttribute {
+	return ExceptionsAttribute{
+		ExceptionIndexTable: reader.readUint16s(),
+	}
+}
+
+func writeExceptionsAttribute(attribute ExceptionsAttribute) []byte {
+	var buf bytes.Buffer
+	buf.Write([]byte{byte(len(attribute.ExceptionIndexTable) >> 8), byte(len(attribute.ExceptionIndexTable))}) // number_of_exceptions
+
+	// 将 ExceptionIndexTable 转换为 []byte
+	for _, index := range attribute.ExceptionIndexTable {
+		buf.Write([]byte{byte(index >> 8), byte(index)}) // 将每个 uint16 转换为两个字节
+	}
+	return buf.Bytes() // 返回字节切片
+}
+
+func writeAttributeInfo(writer *ClassWriter, attr AttributeInfo) []byte {
+	// 如果属性是指针类型，解引用
+	if reflect.TypeOf(attr).Kind() == reflect.Ptr {
+		attr = reflect.ValueOf(attr).Elem().Interface()
+	}
+	var data []byte
+	var nameIndex uint16
+	switch a := attr.(type) {
+	case BootstrapMethodsAttribute:
+		data = writeBootstrapMethodsAttribute(a)
+		nameIndex = writer.cf.GetConstStrIndex(BootstrapMethods)
+	case CodeAttribute:
+		data = writeCodeAttribute(writer, a)
+		nameIndex = writer.cf.GetConstStrIndex(Code)
+	case ConstantValueAttribute:
+		data = writeConstantValueAttribute(a)
+		nameIndex = writer.cf.GetConstStrIndex(ConstantValue)
+	case DeprecatedAttribute:
+		data = writeDeprecatedAttribute(a)
+		nameIndex = writer.cf.GetConstStrIndex(Deprecated)
+	case EnclosingMethodAttribute:
+		data = writeEnclosingMethodAttribute(a)
+		nameIndex = writer.cf.GetConstStrIndex(EnclosingMethod)
+	case ExceptionsAttribute:
+		data = writeExceptionsAttribute(a)
+		nameIndex = writer.cf.GetConstStrIndex(Exceptions)
+	case InnerClassesAttribute:
+		data = writeInnerClassesAttribute(a)
+		nameIndex = writer.cf.GetConstStrIndex(InnerClasses)
+	case LineNumberTableAttribute:
+		data = writeLineNumberTableAttribute(a)
+		nameIndex = writer.cf.GetConstStrIndex(LineNumberTable)
+	case LocalVariableTableAttribute:
+		data = writeLocalVariableTableAttribute(writer, a)
+		nameIndex = writer.cf.GetConstStrIndex(LocalVariableTable)
+	case LocalVariableTypeTableAttribute:
+		data = writeLocalVariableTypeTableAttribute(writer, a)
+		nameIndex = writer.cf.GetConstStrIndex(LocalVariableTypeTable)
+	case ModuleAttribute:
+		data = writeModuleAttribute(a)
+		nameIndex = writer.cf.GetConstStrIndex(Module)
+	case SignatureAttribute:
+		data = writeSignatureAttribute(writer, a)
+		nameIndex = writer.cf.GetConstStrIndex(Signature)
+	case SourceFileAttribute:
+		data = writeSourceFileAttribute(writer, a)
+		nameIndex = writer.cf.GetConstStrIndex(SourceFile)
+	case SyntheticAttribute:
+		data = writeSyntheticAttribute(a)
+		nameIndex = writer.cf.GetConstStrIndex(Synthetic)
+	case UnparsedAttribute:
+		data = writeUnparsedAttribute(writer, a)
+		nameIndex = writer.cf.GetConstStrIndex(Code)
+	default:
+		// 其他类型的属性
+		panic(fmt.Errorf("unknown attribute type: %T", a))
+	}
+	var all = make([]byte, 0)
+	// 将 uint16 转换为 []byte
+	all = append(all, byte(nameIndex>>8), byte(nameIndex)) // 高字节和低字节
+	l := uint32(len(data))
+	// 将 uint32 转换为 []byte
+	all = append(all, byte(l>>24), byte(l>>16), byte(l>>8), byte(l)) // 高字节到低字节
+	all = append(all, data...)
+	return all
+}
+
+func writeAttributes(writer *ClassWriter, attributes []AttributeInfo) []byte {
+	if len(attributes) == 0 {
+		return []byte{0x00, 0x00}
+	}
+	var buf bytes.Buffer
+	// 写入属性的数量
+	buf.Write([]byte{byte(len(attributes) >> 8), byte(len(attributes))}) // 属性数量
+
+	// 遍历每个属性并写入
+	for _, attr := range attributes {
+		buf.Write(writeAttributeInfo(writer, attr)) // 使用返回的字节切片
+	}
+	return buf.Bytes() // 返回字节切片
+}
