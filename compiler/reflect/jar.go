@@ -3,6 +3,7 @@ package reflect
 import (
 	"archive/zip"
 	"bytes"
+	"embed"
 	"github.com/Yyjccc/GoJavassist/classfile"
 	"os"
 	"path/filepath"
@@ -14,9 +15,23 @@ import (
 
 type Classpath struct {
 	read       bool
+	fs         embed.FS
 	path       string
+	isEmbedded bool
 	Jars       []*Jar
 	classFiles []string
+}
+
+func NewClasspathFromFS(fs embed.FS, basePath string) (*Classpath, error) {
+	classpath := &Classpath{
+		path:       basePath,
+		fs:         fs,
+		Jars:       make([]*Jar, 0),
+		isEmbedded: true,
+		classFiles: make([]string, 0),
+	}
+	classpath.Jars = append(classpath.Jars, NewJar(basePath))
+	return classpath, nil
 }
 
 func NewClasspath(path string) (*Classpath, error) {
@@ -75,6 +90,45 @@ func NewJar(path string) *Jar {
 		entries:     []classfile.ClassFile{},
 		rawDataPool: make(map[string][]byte),
 	}
+}
+
+func (j *Jar) ReadFromFS(fs embed.FS) []classfile.ClassFile {
+	j.loaded = true
+
+	data, err := fs.ReadFile(j.path)
+	if err != nil {
+		return make([]classfile.ClassFile, 0)
+	}
+
+	reader, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		return make([]classfile.ClassFile, 0)
+	}
+
+	for _, file := range reader.File {
+		if strings.HasSuffix(file.Name, ".class") {
+			rc, err := file.Open()
+			if err != nil {
+				continue
+			}
+			defer rc.Close()
+
+			buf := new(bytes.Buffer)
+			_, err = io.Copy(buf, rc)
+			if err != nil {
+				continue
+			}
+
+			data := buf.Bytes()
+			cf, err := classfile.Parse(data)
+			if err != nil {
+				continue
+			}
+			j.entries = append(j.entries, *cf)
+			j.rawDataPool[cf.GetThisClassName()] = data
+		}
+	}
+	return j.entries
 }
 
 func (j *Jar) Read() []classfile.ClassFile {

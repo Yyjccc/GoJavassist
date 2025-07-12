@@ -469,7 +469,7 @@ func TestParserDecl(t *testing.T) {
 		token := lexer.NextToken()
 		tokens = append(tokens, token)
 	}
-	compiler := NewJCompiler(nil)
+	compiler := NewJavac(nil)
 	err := compiler.compile(code)
 
 	if err != nil {

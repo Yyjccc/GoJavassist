@@ -2,6 +2,7 @@ package reflect
 
 import (
 	"github.com/Yyjccc/GoJavassist/classfile"
+	"github.com/Yyjccc/GoJavassist/compiler/lib"
 	"io/ioutil"
 	"strings"
 )
@@ -11,7 +12,7 @@ var DefaultPool *ClassPool
 
 func init() {
 	bootLoader = NewClassLoader(nil)
-	libClassPath, err := NewClasspath("./lib/")
+	libClassPath, err := NewClasspathFromFS(lib.RtJar, "rt.jar")
 	if err == nil {
 		bootLoader.AddClassPath(libClassPath)
 		bootLoader.LoadClassPaths()
@@ -44,7 +45,12 @@ func (l *ClassLoader) LoadClassPaths() {
 	for _, path := range l.ClassPath {
 		if !path.read {
 			for _, jar := range path.Jars {
-				classes := jar.Read()
+				var classes []classfile.ClassFile
+				if path.isEmbedded {
+					classes = jar.ReadFromFS(path.fs)
+				} else {
+					classes = jar.Read()
+				}
 				for _, class := range classes {
 					name := class.GetThisClassName()
 					l.LoadedClasses[name] = class
