@@ -8,7 +8,8 @@ const major = 52
 
 type ClassPool struct {
 	Parent       *ClassPool
-	classes      map[string]*CtClass
+	ClassLoader  *ClassLoader
+	classes      map[string]CtClass
 	MajorVersion int
 }
 
@@ -16,22 +17,26 @@ func GetVersion() int {
 	return major
 }
 
-func NewClassPool(parent *ClassPool) *ClassPool {
+func NewClassPool(parent *ClassPool, loader *ClassLoader) *ClassPool {
 	return &ClassPool{
-		Parent:  parent,
-		classes: make(map[string]*CtClass),
+		Parent:      parent,
+		ClassLoader: loader,
+		classes:     make(map[string]CtClass),
 	}
 }
 
 func (this *ClassPool) Get(full string) *CtClass {
 	if class, ok := this.classes[full]; ok {
-		return class
+		return &class
 	}
 	if this.Parent != nil {
 		return this.Parent.Get(full)
 	}
-
-	cf := bootLoader.LoadClass(toJvmName(full))
+	loader := bootLoader
+	if this.ClassLoader != nil {
+		loader = this.ClassLoader
+	}
+	cf := loader.LoadClass(toJvmName(full))
 	if cf != nil {
 		class := NewClass(cf)
 		this.Register(class)
@@ -42,14 +47,20 @@ func (this *ClassPool) Get(full string) *CtClass {
 
 func (this *ClassPool) Put(class *CtClass) {
 	if class != nil {
-		this.classes[class.QualifiedName] = class
+		this.classes[class.QualifiedName] = *class
 	}
 }
 
 func (this *ClassPool) Register(class *CtClass) {
-	if class == nil {
-		this.classes[class.QualifiedName] = class
+	if this == nil {
+		InitClassPool()
+		this = DefaultPool
 	}
+	if class == nil {
+		return
+	}
+	class.loadPool = this
+	this.classes[class.QualifiedName] = *class
 }
 
 // only make array type

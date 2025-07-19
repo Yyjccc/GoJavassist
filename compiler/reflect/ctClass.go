@@ -18,6 +18,10 @@ type CtPrimitiveType struct {
 	dataSize      int
 }
 
+func (p *CtPrimitiveType) GetReturnOp() classfile.OpCode {
+	return p.returnOp
+}
+
 func (c *CtPrimitiveType) GetWrapperName() string {
 	return c.wrapper
 }
@@ -69,7 +73,7 @@ func NewClass(class *classfile.ClassFile) *CtClass {
 	c.QualifiedName = _fullName(name)
 	c.SimpleName = _simpleName(name)
 	c.PackageName = _packageName(name)
-	c.SuperClassName = c.GetSimpleType(class.GetSuperClassName())
+	c.SuperClassName = _fullName(class.GetSuperClassName())
 	for _, method := range class.Methods {
 		ClassMethod := NewMethod(c, &method)
 		c.Methods[ClassMethod.GetFullName()] = ClassMethod
@@ -78,10 +82,55 @@ func NewClass(class *classfile.ClassFile) *CtClass {
 		ClassField := NewField(c, &field)
 		c.Fields[ClassField.Name] = ClassField
 	}
+	DefaultPool.Register(c)
 	return c
 }
 
+func (c *CtClass) ChangeThisClassName(fullName string) error {
+	pool := c.loadPool
+	if pool == nil {
+		pool = DefaultPool
+	}
+	class := pool.Get(fullName)
+	if class != nil {
+		return fmt.Errorf(" %s : already has this class.", fullName)
+	}
+	c.ReplaceSymbolLink(c.QualifiedName, fullName)
+	c.QualifiedName = fullName
+	c.SimpleName = _simpleName(fullName)
+	c.PackageName = _packageName(fullName)
+	pool.Register(c)
+	return nil
+}
+
+// ReplaceSymbolLink 替换常量池中的符号:直接替换,无需进入编辑模式
+func (c *CtClass) ReplaceSymbolLink(oldSymbol, newSymbol string) {
+
+	for i, constInfo := range c.ClassFile.ConstantPool {
+		if utf8, ok := constInfo.([]byte); ok {
+			s := string(utf8)
+			if strings.Contains(s, ".") && strings.Contains(newSymbol, ".") {
+				res := strings.ReplaceAll(s, oldSymbol, newSymbol)
+				c.ClassFile.ConstantPool[i] = []byte(res)
+				continue
+			}
+			if strings.Contains(s, "/") {
+				jvmName := strings.ReplaceAll(newSymbol, ".", "/")
+				oldjvmName := strings.ReplaceAll(oldSymbol, ".", "/")
+				res := strings.ReplaceAll(s, oldjvmName, jvmName)
+				c.ClassFile.ConstantPool[i] = []byte(res)
+			}
+			str := c.ClassFile.ConstantPool[i].([]byte)
+			res := strings.ReplaceAll(string(str), oldSymbol, newSymbol)
+			c.ClassFile.ConstantPool[i] = []byte(res)
+		}
+	}
+}
+
 func (c *CtClass) GetDescriptor() string {
+	if c.isPrimitive {
+		return string(c.PrimitiveType.Descriptor)
+	}
 	if !c.editMode {
 		return _toDescriptor(c.ClassFile.GetThisClassName())
 	}
@@ -232,15 +281,15 @@ func (c *CtClass) GetComponentType() *CtClass {
 }
 
 func (c *CtClass) GetConstPool() *ConstPool {
-	if c.editMode {
-		return c.edPool
+	if !c.editMode {
+		c.enterEditorMode()
 	}
-	return nil
+	return c.edPool
 }
 
 func (c *CtClass) ToClassFile() *classfile.ClassFile {
 	cp := c.GetConstPool()
-	cf := c.ClassFile
+	cf := classfile.NewClassFile()
 	c.editMode = false
 	c.wasFrozen = true
 	for _, method := range c.Methods {
@@ -259,13 +308,19 @@ func (c *CtClass) ToClassFile() *classfile.ClassFile {
 	if c.SuperClassName == "" {
 		c.SuperClassName = "java.lang.Object"
 	}
-	superInfo := classfile.ConstantClassInfo{
-		NameIndex: uint16(cp.AddString(toJvmName(c.SuperClassName))),
-	}
-	cf.SuperClass = uint16(cp.AddConstantClassInfo(superInfo))
 	pool := cp.GetPool()
+	cf.AccessFlags = c.Acc.toAccessFlags()
 	cf.ConstantPool = pool
 	cf.ConstantPoolCount = uint16(len(cf.ConstantPool))
+	thisIndex := cf.GetConstStrIndex(toJvmName(c.QualifiedName))
+	cf.ThisClass = cf.GetConstantClassInfoIndex(thisIndex)
+	superClass := c.loadPool.Get(c.SuperClassName)
+	if superClass == nil {
+		panic("super class not exist")
+	}
+	superIndex := cf.GetConstStrIndex(toJvmName(superClass.QualifiedName))
+	cf.SuperClass = cf.GetConstantClassInfoIndex(superIndex)
+	c.ClassFile = cf
 	return cf
 }
 
@@ -335,4 +390,95 @@ func (c *CtClass) GetClassPool() *ClassPool {
 
 func (c *CtClass) GetSuperClass() *CtClass {
 	return c.GetClassPool().Get(c.SuperClassName)
+}
+
+// SetSuperClass 设置父类
+func (c *CtClass) SetSuperClass(pool *ClassPool, fullName string) error {
+	c.CheckModify()
+	superClass := pool.Get(fullName)
+	if superClass == nil {
+		return fmt.Errorf("class %s not found", fullName)
+	}
+	c.checkImport(fullName)
+
+	return nil
+}
+
+// AddInterface 添加类实现的接口--不会添加相关实现方法
+func (c *CtClass) AddInterface(pool *ClassPool, fullName string) error {
+	c.CheckModify()
+	c.enterEditorMode()
+	interfaceClass := pool.Get(fullName)
+	if interfaceClass == nil {
+		return fmt.Errorf("class %s not found", fullName)
+	}
+	if !interfaceClass.isInterface {
+		return fmt.Errorf("class %s is not an interface", fullName)
+	}
+	c.checkImport(fullName)
+	c.Interfaces = append(c.Interfaces, interfaceClass)
+	c.edPool.AddClassInfo0(interfaceClass)
+	return nil
+}
+
+// checkImport 检查类是否导入
+func (c *CtClass) checkImport(className string) {
+	if strings.HasPrefix(className, "java.lang") {
+		return
+	}
+	for _, imp := range c.Imports {
+		if imp == className {
+			return
+		}
+	}
+	c.Imports = append(c.Imports, className)
+}
+
+// enterEditorMode 进入编辑模式
+func (c *CtClass) enterEditorMode() {
+	if !c.editMode {
+		c.editMode = true
+		c.wasFrozen = false
+		c.wasChanged = true
+		c.edPool = NewConstPool(c, c.ClassFile.ConstantPool)
+	}
+}
+
+func (c *CtClass) Equal(class *CtClass) bool {
+	return c.QualifiedName == class.QualifiedName
+}
+
+func (c *CtClass) GetDeclareMethods(methodName string) []*CtMethod {
+	var methods []*CtMethod
+	for _, m := range c.Methods {
+		if m.Name == methodName {
+			methods = append(methods, m)
+		}
+	}
+	return methods
+}
+
+func (c *CtClass) RemoveDebugAttribute() {
+	c.CheckModify()
+	c.GetConstPool()
+	for _, m := range c.Methods {
+		attrs := make([]classfile.AttributeInfo, 0)
+		for _, a := range m.Member.AttributeTable {
+			if codeAtr, ok := a.(classfile.CodeAttribute); ok {
+				attrs = append(attrs, codeAtr.RemoveDebugAttribute(c.ClassFile))
+				continue
+			}
+			if codeAtr, ok := a.(*classfile.CodeAttribute); ok {
+				attrs = append(attrs, codeAtr.RemoveDebugAttribute(c.ClassFile))
+				continue
+			}
+			attrs = append(attrs, a)
+		}
+		m.Member.AttributeTable = attrs
+	}
+}
+
+func (c *CtClass) Unfreeze() {
+	c.wasFrozen = false
+	c.wasChanged = true
 }

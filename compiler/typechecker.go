@@ -625,7 +625,15 @@ func (j *TypeChecker) fieldAccess(expr ast.Node) (*reflect.CtField, error) {
 				return nil, err
 			}
 			if j.exprType == ast.Class && j.arrayDim == 0 {
-				return j.resolver.lookupFieldByJvmName(j.className, e.Oprand2().(*ast.Symbol))
+				var symbol *ast.Symbol
+				if s, ok := e.Oprand2().(*ast.Symbol); ok {
+					symbol = s
+				}
+				if m, ok := e.Oprand2().(*ast.MemberSymbol); ok {
+					symbol = m.Symbol
+				}
+
+				return j.resolver.lookupFieldByJvmName(j.className, symbol)
 			}
 			oprnd1 := e.Oprand1()
 			if s, ok := oprnd1.(*ast.Symbol); ok {

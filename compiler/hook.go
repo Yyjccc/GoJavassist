@@ -65,29 +65,29 @@ func (j *JsrHook) DoIt(b *ByteCodes, opcode classfile.OpCode) bool {
 		j.jsrJmp(b)
 		break
 	case classfile.OpAReturn:
-		b.addAStore(j.GetVar(1))
+		b.AddAStore(j.GetVar(1))
 		j.jsrJmp(b)
 		b.AddLload(j.varIndex)
 		break
 	case classfile.OpIReturn:
-		b.addIStore(j.GetVar(1))
+		b.AddIStore(j.GetVar(1))
 		j.jsrJmp(b)
-		b.addIload(j.varIndex)
+		b.AddIload(j.varIndex)
 		break
 	case classfile.OpLReturn:
-		b.addLstore(j.GetVar(2))
+		b.AddLstore(j.GetVar(2))
 		j.jsrJmp(b)
 		b.AddLload(j.varIndex)
 		break
 	case classfile.OpDReturn:
-		b.addDstore(j.GetVar(2))
+		b.AddDstore(j.GetVar(2))
 		j.jsrJmp(b)
-		b.addDload(j.varIndex)
+		b.AddDload(j.varIndex)
 		break
 	case classfile.OpFReturn:
-		b.addFstore(j.GetVar(1))
+		b.AddFstore(j.GetVar(1))
 		j.jsrJmp(b)
-		b.addFload(j.varIndex)
+		b.AddFload(j.varIndex)
 		break
 	default:
 		panic("fatal JsrHook")

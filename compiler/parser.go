@@ -22,10 +22,10 @@ func NewParser(input string) *Parser {
 	}
 }
 
-func (p *Parser) parseMember1(table *SymbolTable) (*ast.ASTList, bool, error) {
+func (p *Parser) ParseMember1(table *SymbolTable) (*ast.ASTList, bool, error) {
 	var d *ast.Declarator
 	var err error
-	mods := p.parseMemberMods(table)
+	mods := p.ParseMemberMods(table)
 	var isConstructor = false
 	// 构造方法的情况: 修饰符后 是 标识符 和 (
 	if p.lookAHeadToken().ID == ast.Identifier && p.lookHeadNToken(2).Value == "(" {
@@ -34,7 +34,7 @@ func (p *Parser) parseMember1(table *SymbolTable) (*ast.ASTList, bool, error) {
 		d = ast.NewDeclaratorTypeDim(ast.Void, 0)
 	} else {
 		//普通的方法
-		d, err = p.parseFormalType(table)
+		d, err = p.ParseFormalType(table)
 		if err != nil {
 			return nil, false, err
 		}
@@ -53,14 +53,14 @@ func (p *Parser) parseMember1(table *SymbolTable) (*ast.ASTList, bool, error) {
 	}
 	if !isConstructor && p.lookAHeadToken().Value != "(" {
 		//后面没有参数列表，为属性声明
-		field, err := p.parseField(table, mods, d)
+		field, err := p.ParseField(table, mods, d)
 		if err != nil {
 			return nil, false, err
 		}
 		return field.ASTList, false, err
 	} else {
 		//方法声明
-		method, err := p.parseMethod1(table, isConstructor, mods, d)
+		method, err := p.ParseMethod1(table, isConstructor, mods, d)
 		if err != nil {
 			return nil, true, err
 		}
@@ -69,7 +69,7 @@ func (p *Parser) parseMember1(table *SymbolTable) (*ast.ASTList, bool, error) {
 }
 
 // parseMemberMods parse Modifiers
-func (p *Parser) parseMemberMods(table *SymbolTable) *ast.ASTList {
+func (p *Parser) ParseMemberMods(table *SymbolTable) *ast.ASTList {
 	var list *ast.ASTList = nil
 	for {
 		lookToken := p.lookAHeadToken()
@@ -83,15 +83,15 @@ func (p *Parser) parseMemberMods(table *SymbolTable) *ast.ASTList {
 }
 
 // parse type
-func (p *Parser) parseFormalType(table *SymbolTable) (*ast.Declarator, error) {
+func (p *Parser) ParseFormalType(table *SymbolTable) (*ast.Declarator, error) {
 	t := p.lookAHeadToken().ID
 
 	if !t.IsBasicType() && t != ast.Void {
-		name, err := p.parseClassType(table)
+		name, err := p.ParseClassType(table)
 		if err != nil {
 			return nil, err
 		}
-		dim, err := p.parseArrayDimension()
+		dim, err := p.ParseArrayDimension()
 		if err != nil {
 			return nil, err
 		}
@@ -99,7 +99,7 @@ func (p *Parser) parseFormalType(table *SymbolTable) (*ast.Declarator, error) {
 	} else {
 		//基本数据类型 or void
 		p.getToken()
-		dim, err := p.parseArrayDimension()
+		dim, err := p.ParseArrayDimension()
 		if err != nil {
 			return nil, err
 		}
@@ -108,7 +108,7 @@ func (p *Parser) parseFormalType(table *SymbolTable) (*ast.Declarator, error) {
 }
 
 // 解析java 类型
-func (p *Parser) parseClassType(table *SymbolTable) (*ast.ASTList, error) {
+func (p *Parser) ParseClassType(table *SymbolTable) (*ast.ASTList, error) {
 	var list *ast.ASTList = nil
 	for {
 		if p.getToken().ID != ast.Identifier {
@@ -124,7 +124,7 @@ func (p *Parser) parseClassType(table *SymbolTable) (*ast.ASTList, error) {
 	return list, nil
 }
 
-func (p *Parser) parseArrayDimension() (int, error) {
+func (p *Parser) ParseArrayDimension() (int, error) {
 	arrayDim := 0
 	for {
 		if p.lookAHeadToken().Value != "[" {
@@ -169,6 +169,7 @@ func (p *Parser) getToken() Token {
 // only look the current coast token of next token
 func (p *Parser) lookAHeadToken() Token {
 	if !p.lex.HasNextToken() {
+		p.lex.pos++
 		//if read all tokens
 		return EOFToken
 	}
@@ -193,12 +194,12 @@ func (p *Parser) lookHeadNToken(n int) Token {
 	return p.tokenList[i]
 }
 
-func (p *Parser) parseField(table *SymbolTable, mods *ast.ASTList, d *ast.Declarator) (*ast.FieldDecl, error) {
+func (p *Parser) ParseField(table *SymbolTable, mods *ast.ASTList, d *ast.Declarator) (*ast.FieldDecl, error) {
 	var expr ast.Node
 	var err error
 	if p.lookAHeadToken().Value == "=" {
 		p.getToken()
-		expr, err = p.parseExpression(table)
+		expr, err = p.ParseExpression(table)
 		if err != nil {
 			return nil, err
 		}
@@ -212,14 +213,14 @@ func (p *Parser) parseField(table *SymbolTable, mods *ast.ASTList, d *ast.Declar
 	return nil, fmt.Errorf(p.syanxError())
 }
 
-func (p *Parser) parseMethod1(table *SymbolTable, isConstructor bool, mods *ast.ASTList, d *ast.Declarator) (*ast.MethodDecl, error) {
+func (p *Parser) ParseMethod1(table *SymbolTable, isConstructor bool, mods *ast.ASTList, d *ast.Declarator) (*ast.MethodDecl, error) {
 	if p.getToken().Value != "(" {
 		return nil, fmt.Errorf(p.syanxError())
 	}
 	var params *ast.ASTList
 	if p.lookAHeadToken().Value != ")" {
 		for {
-			arg, err := p.parseFormalParam(table)
+			arg, err := p.ParseFormalParam(table)
 			if err != nil {
 				return nil, err
 			}
@@ -233,7 +234,7 @@ func (p *Parser) parseMethod1(table *SymbolTable, isConstructor bool, mods *ast.
 		}
 	}
 	p.getToken() // ')'
-	dimension, err := p.parseArrayDimension()
+	dimension, err := p.ParseArrayDimension()
 	if err != nil {
 		return nil, err
 	}
@@ -247,7 +248,7 @@ func (p *Parser) parseMethod1(table *SymbolTable, isConstructor bool, mods *ast.
 	if p.lookAHeadToken().ID == ast.Throws {
 		p.getToken()
 		for {
-			classType, err := p.parseClassType(table)
+			classType, err := p.ParseClassType(table)
 			if err != nil {
 				return nil, err
 			}
@@ -263,9 +264,9 @@ func (p *Parser) parseMethod1(table *SymbolTable, isConstructor bool, mods *ast.
 }
 
 // 解析参数声明
-func (p *Parser) parseFormalParam(table *SymbolTable) (*ast.Declarator, error) {
+func (p *Parser) ParseFormalParam(table *SymbolTable) (*ast.Declarator, error) {
 	// 参数类型
-	d, err := p.parseFormalType(table)
+	d, err := p.ParseFormalType(table)
 	if err != nil {
 		return nil, err
 	}
@@ -274,7 +275,7 @@ func (p *Parser) parseFormalParam(table *SymbolTable) (*ast.Declarator, error) {
 	}
 	name := p.getString()
 	d.SetVariable(ast.NewSymbol(name))
-	dimension, err := p.parseArrayDimension()
+	dimension, err := p.ParseArrayDimension()
 	if err != nil {
 		return nil, err
 	}
@@ -283,13 +284,13 @@ func (p *Parser) parseFormalParam(table *SymbolTable) (*ast.Declarator, error) {
 	return d, nil
 }
 
-func (p *Parser) parseMethod2(table *SymbolTable, md *ast.MethodDecl) (*ast.MethodDecl, error) {
+func (p *Parser) ParseMethod2(table *SymbolTable, md *ast.MethodDecl) (*ast.MethodDecl, error) {
 	var body *ast.Statement
 	var err error
 	if p.lookAHeadToken().Value == ";" {
 		p.getToken()
 	} else {
-		body, err = p.parseBlock(table)
+		body, err = p.ParseBlock(table)
 		if err != nil {
 			return nil, err
 		}
@@ -301,7 +302,7 @@ func (p *Parser) parseMethod2(table *SymbolTable, md *ast.MethodDecl) (*ast.Meth
 	return md, nil
 }
 
-func (p *Parser) parseBlock(table *SymbolTable) (*ast.Statement, error) {
+func (p *Parser) ParseBlock(table *SymbolTable) (*ast.Statement, error) {
 	if p.getToken().Value != "{" {
 		return nil, fmt.Errorf(p.syanxError())
 	}
@@ -309,7 +310,7 @@ func (p *Parser) parseBlock(table *SymbolTable) (*ast.Statement, error) {
 	//局部变量表
 	tbl := NewSymbolTable(table)
 	for p.lookAHeadToken().Value != "}" {
-		s, err := p.parseStatement(tbl)
+		s, err := p.ParseStatement(tbl)
 		if err != nil {
 			return nil, err
 		}
@@ -325,11 +326,11 @@ func (p *Parser) parseBlock(table *SymbolTable) (*ast.Statement, error) {
 	return body, nil
 }
 
-func (p *Parser) parseStatement(tbl *SymbolTable) (*ast.Statement, error) {
+func (p *Parser) ParseStatement(tbl *SymbolTable) (*ast.Statement, error) {
 	token := p.lookAHeadToken()
 	switch {
 	case token.Value == "{":
-		block, err := p.parseBlock(tbl)
+		block, err := p.ParseBlock(tbl)
 		return block, err
 	case token.Value == ";":
 		p.getToken()
@@ -341,65 +342,65 @@ func (p *Parser) parseStatement(tbl *SymbolTable) (*ast.Statement, error) {
 		//:
 		p.getToken()
 
-		statement, err := p.parseStatement(tbl)
+		statement, err := p.ParseStatement(tbl)
 		if err != nil {
 			return nil, err
 		}
 		return ast.MakeStatement(ast.Label, ast.NewSymbol(labelName), statement), nil
 	case token.ID == ast.IF:
-		stat, err := p.parseIf(tbl)
+		stat, err := p.ParseIf(tbl)
 		return stat, err
 	case token.ID == ast.While:
-		stat, err := p.parseWhile(tbl)
+		stat, err := p.ParseWhile(tbl)
 		return stat, err
 	case token.ID == ast.Do:
-		stat, err := p.parseDo(tbl)
+		stat, err := p.ParseDo(tbl)
 		return stat, err
 	case token.ID == ast.For:
-		stat, err := p.parseFor(tbl)
+		stat, err := p.ParseFor(tbl)
 		return stat, err
 	case token.ID == ast.Try:
-		stat, err := p.parseTry(tbl)
+		stat, err := p.ParseTry(tbl)
 		return stat, err
 	case token.ID == ast.Switch:
-		stat, err := p.parseSwitch(tbl)
+		stat, err := p.ParseSwitch(tbl)
 		return stat, err
 	case token.ID == ast.Synchronized:
-		stat, err := p.parseSynchronized(tbl)
+		stat, err := p.ParseSynchronized(tbl)
 		return stat, err
 	case token.ID == ast.Return:
-		stat, err := p.parseReturn(tbl)
+		stat, err := p.ParseReturn(tbl)
 		return stat, err
 	case token.ID == ast.Throw:
-		stat, err := p.parseThrow(tbl)
+		stat, err := p.ParseThrow(tbl)
 		return stat, err
 	case token.ID == ast.Break:
-		stat, err := p.parseBreak(tbl)
+		stat, err := p.ParseBreak(tbl)
 		return stat, err
 	case token.ID == ast.Continue:
-		stat, err := p.parseContinue(tbl)
+		stat, err := p.ParseContinue(tbl)
 		return stat, err
 	default:
-		stat, err := p.parseDeclarationOrExpression(tbl, false)
+		stat, err := p.ParseDeclarationOrExpression(tbl, false)
 		return stat, err
 	}
 }
 
 // 解析if 语句
-func (p *Parser) parseIf(tbl *SymbolTable) (*ast.Statement, error) {
+func (p *Parser) ParseIf(tbl *SymbolTable) (*ast.Statement, error) {
 	token := p.getToken()
-	expr, err := p.parseParExpression(tbl)
+	expr, err := p.ParseParExpression(tbl)
 	if err != nil {
 		return nil, err
 	}
-	thenp, err := p.parseStatement(tbl)
+	thenp, err := p.ParseStatement(tbl)
 	if err != nil {
 		return nil, err
 	}
 	var elsep *ast.Statement
 	if p.lookAHeadToken().ID == ast.Else {
 		p.getToken()
-		elsep, err = p.parseStatement(tbl)
+		elsep, err = p.ParseStatement(tbl)
 		if err != nil {
 			return nil, err
 		}
@@ -407,27 +408,27 @@ func (p *Parser) parseIf(tbl *SymbolTable) (*ast.Statement, error) {
 	return ast.NewStatement(token.ID, expr, ast.NewASTList(thenp, ast.NewASTListSingle(elsep))), nil
 }
 
-func (p *Parser) parseWhile(tbl *SymbolTable) (*ast.Statement, error) {
+func (p *Parser) ParseWhile(tbl *SymbolTable) (*ast.Statement, error) {
 	t := p.getToken()
-	expr, err := p.parseExpression(tbl)
+	expr, err := p.ParseExpression(tbl)
 	if err != nil {
 		return nil, err
 	}
-	body, err := p.parseStatement(tbl)
+	body, err := p.ParseStatement(tbl)
 	if err != nil {
 		return nil, err
 	}
 	return ast.NewStatement(t.ID, expr, body), nil
 }
 
-func (p *Parser) parseDo(tbl *SymbolTable) (*ast.Statement, error) {
+func (p *Parser) ParseDo(tbl *SymbolTable) (*ast.Statement, error) {
 	t := p.getToken()
-	body, err := p.parseStatement(tbl)
+	body, err := p.ParseStatement(tbl)
 	if err != nil {
 		return nil, err
 	}
 	if p.getToken().ID == ast.While && p.lookAHeadToken().Value == "(" {
-		expr, err := p.parseExpression(tbl)
+		expr, err := p.ParseExpression(tbl)
 		if err != nil {
 			return nil, err
 		}
@@ -439,7 +440,7 @@ func (p *Parser) parseDo(tbl *SymbolTable) (*ast.Statement, error) {
 	return nil, fmt.Errorf(p.syanxError())
 }
 
-func (p *Parser) parseFor(tbl *SymbolTable) (*ast.Statement, error) {
+func (p *Parser) ParseFor(tbl *SymbolTable) (*ast.Statement, error) {
 	t := p.getToken()
 	//新建局部变量表
 	table := NewSymbolTable(tbl)
@@ -451,14 +452,14 @@ func (p *Parser) parseFor(tbl *SymbolTable) (*ast.Statement, error) {
 	if p.lookAHeadToken().Value == ";" {
 		p.getToken()
 	} else {
-		expr, err = p.parseDeclarationOrExpression(table, true)
+		expr, err = p.ParseDeclarationOrExpression(table, true)
 		if err != nil {
 			return nil, err
 		}
 	}
 	var node ast.Node
 	if p.lookAHeadToken().Value != ";" {
-		node, err = p.parseExpression(table)
+		node, err = p.ParseExpression(table)
 		if err != nil {
 			return nil, err
 		}
@@ -468,7 +469,7 @@ func (p *Parser) parseFor(tbl *SymbolTable) (*ast.Statement, error) {
 	}
 	var s *ast.Statement
 	if p.lookAHeadToken().Value != ")" {
-		s, err = p.parseStatement(table)
+		s, err = p.ParseStatement(table)
 		if err != nil {
 			return nil, err
 		}
@@ -476,16 +477,16 @@ func (p *Parser) parseFor(tbl *SymbolTable) (*ast.Statement, error) {
 	if p.getToken().Value != ")" {
 		return nil, fmt.Errorf(p.syanxError() + "cause: ')' is missing.")
 	}
-	body, err := p.parseStatement(table)
+	body, err := p.ParseStatement(table)
 	if err != nil {
 		return nil, err
 	}
 	return ast.NewStatement(t.ID, expr, ast.AppendASTList(node.(*ast.ASTList), ast.ConcatASTList(s.GetASTList(), body.GetASTList()))), nil
 }
 
-func (p *Parser) parseTry(tbl *SymbolTable) (*ast.Statement, error) {
+func (p *Parser) ParseTry(tbl *SymbolTable) (*ast.Statement, error) {
 	p.getToken()
-	block, err := p.parseBlock(tbl)
+	block, err := p.ParseBlock(tbl)
 	if err != nil {
 		return nil, err
 	}
@@ -500,7 +501,7 @@ func (p *Parser) parseTry(tbl *SymbolTable) (*ast.Statement, error) {
 		}
 		// 新建局部变量表
 		table := NewSymbolTable(tbl)
-		d, newErr = p.parseFormalParam(tbl)
+		d, newErr = p.ParseFormalParam(tbl)
 		if newErr != nil {
 			return nil, newErr
 		}
@@ -510,7 +511,7 @@ func (p *Parser) parseTry(tbl *SymbolTable) (*ast.Statement, error) {
 		if p.getToken().Value != ")" {
 			return nil, fmt.Errorf(p.syanxError() + "cause: ')' is missing.")
 		}
-		b, newErr = p.parseBlock(table)
+		b, newErr = p.ParseBlock(table)
 		if newErr != nil {
 			return nil, newErr
 		}
@@ -519,7 +520,7 @@ func (p *Parser) parseTry(tbl *SymbolTable) (*ast.Statement, error) {
 	var finallyBlock *ast.Statement
 	if p.lookAHeadToken().ID == ast.Finally {
 		p.getToken()
-		finallyBlock, newErr = p.parseBlock(tbl)
+		finallyBlock, newErr = p.ParseBlock(tbl)
 		if newErr != nil {
 			return nil, newErr
 		}
@@ -527,20 +528,20 @@ func (p *Parser) parseTry(tbl *SymbolTable) (*ast.Statement, error) {
 	return ast.MakeStatementThree(ast.Try, block, catchList, finallyBlock), nil
 }
 
-func (p *Parser) parseSwitch(tbl *SymbolTable) (*ast.Statement, error) {
+func (p *Parser) ParseSwitch(tbl *SymbolTable) (*ast.Statement, error) {
 	t := p.getToken()
-	expr, err := p.parseExpression(tbl)
+	expr, err := p.ParseExpression(tbl)
 	if err != nil {
 		return nil, err
 	}
-	body, err := p.parseSwitchBlock(tbl)
+	body, err := p.ParseSwitchBlock(tbl)
 	if err != nil {
 		return nil, err
 	}
 	return ast.NewStatement(t.ID, expr, body.GetASTList()), nil
 }
 
-func (p *Parser) parseSwitchBlock(tbl *SymbolTable) (*ast.Statement, error) {
+func (p *Parser) ParseSwitchBlock(tbl *SymbolTable) (*ast.Statement, error) {
 	if p.getToken().Value != "{" {
 		return nil, fmt.Errorf(p.syanxError())
 	}
@@ -588,13 +589,13 @@ func (p *Parser) parseSwitchBlock(tbl *SymbolTable) (*ast.Statement, error) {
 func (p *Parser) parseStmntOrCase(table *SymbolTable) (*ast.Statement, error) {
 	t := p.lookAHeadToken()
 	if t.ID != ast.Case && t.ID != ast.Default {
-		statement, err := p.parseStatement(table)
+		statement, err := p.ParseStatement(table)
 		return statement, err
 	}
 	p.getToken()
 	var s *ast.Statement
 	if t.ID == ast.Case {
-		expr, e := p.parseExpression(table)
+		expr, e := p.ParseExpression(table)
 		if e != nil {
 			return nil, e
 		}
@@ -608,30 +609,30 @@ func (p *Parser) parseStmntOrCase(table *SymbolTable) (*ast.Statement, error) {
 	return s, nil
 }
 
-func (p *Parser) parseSynchronized(tbl *SymbolTable) (*ast.Statement, error) {
+func (p *Parser) ParseSynchronized(tbl *SymbolTable) (*ast.Statement, error) {
 	t := p.getToken()
 	if p.getToken().Value != "(" {
 		return nil, fmt.Errorf(p.syanxError() + "cause: '(' is missing.")
 	}
-	expr, err := p.parseExpression(tbl)
+	expr, err := p.ParseExpression(tbl)
 	if err != nil {
 		return nil, err
 	}
 	if p.getToken().Value != ")" {
 		return nil, fmt.Errorf(p.syanxError())
 	}
-	body, err := p.parseBlock(tbl)
+	body, err := p.ParseBlock(tbl)
 	if err != nil {
 		return nil, err
 	}
 	return ast.NewStatement(t.ID, expr, body.GetASTList()), nil
 }
 
-func (p *Parser) parseReturn(tbl *SymbolTable) (*ast.Statement, error) {
+func (p *Parser) ParseReturn(tbl *SymbolTable) (*ast.Statement, error) {
 	token := p.getToken()
 	s := ast.NewStatementEmpty(token.ID)
 	if p.lookAHeadToken().Value != ";" {
-		expression, err := p.parseExpression(tbl)
+		expression, err := p.ParseExpression(tbl)
 		if err != nil {
 			return nil, err
 		}
@@ -643,9 +644,9 @@ func (p *Parser) parseReturn(tbl *SymbolTable) (*ast.Statement, error) {
 	return s, nil
 }
 
-func (p *Parser) parseThrow(tbl *SymbolTable) (*ast.Statement, error) {
+func (p *Parser) ParseThrow(tbl *SymbolTable) (*ast.Statement, error) {
 	token := p.getToken()
-	expression, err := p.parseExpression(tbl)
+	expression, err := p.ParseExpression(tbl)
 	if err != nil {
 		return nil, err
 	}
@@ -655,11 +656,11 @@ func (p *Parser) parseThrow(tbl *SymbolTable) (*ast.Statement, error) {
 	return ast.NewStatementSingle(token.ID, expression), nil
 }
 
-func (p *Parser) parseBreak(tbl *SymbolTable) (*ast.Statement, error) {
-	return p.parseContinue(tbl)
+func (p *Parser) ParseBreak(tbl *SymbolTable) (*ast.Statement, error) {
+	return p.ParseContinue(tbl)
 }
 
-func (p *Parser) parseContinue(tbl *SymbolTable) (*ast.Statement, error) {
+func (p *Parser) ParseContinue(tbl *SymbolTable) (*ast.Statement, error) {
 	t1 := p.getToken()
 	s := ast.NewStatementEmpty(t1.ID)
 	t2 := p.getToken()
@@ -673,7 +674,7 @@ func (p *Parser) parseContinue(tbl *SymbolTable) (*ast.Statement, error) {
 	return s, nil
 }
 
-func (p *Parser) parseDeclarationOrExpression(tbl *SymbolTable, exprList bool) (*ast.Statement, error) {
+func (p *Parser) ParseDeclarationOrExpression(tbl *SymbolTable, exprList bool) (*ast.Statement, error) {
 	t := p.lookAHeadToken().ID
 	for t == ast.Finally {
 		p.getToken()
@@ -682,28 +683,28 @@ func (p *Parser) parseDeclarationOrExpression(tbl *SymbolTable, exprList bool) (
 	if t.IsBasicType() {
 		//基本类型声明
 		token := p.getToken()
-		i, err := p.parseArrayDimension()
+		i, err := p.ParseArrayDimension()
 		if err != nil {
 			return nil, err
 		}
-		declarators, err := p.parseDeclarators(tbl, ast.NewDeclaratorTypeDim(token.ID, i))
+		declarators, err := p.ParseDeclarators(tbl, ast.NewDeclaratorTypeDim(token.ID, i))
 		return declarators, err
 	} else {
 		if t == ast.Identifier {
 			i := p.nextIsClassType(1)
 			if i > 0 && p.lookHeadNToken(i).ID == ast.Identifier {
-				classType, err := p.parseClassType(tbl)
+				classType, err := p.ParseClassType(tbl)
 				if err != nil {
 					return nil, err
 				}
 				if classType == nil {
 					return nil, fmt.Errorf(p.syanxError() + "unkwon class.")
 				}
-				dimension, err := p.parseArrayDimension()
+				dimension, err := p.ParseArrayDimension()
 				if err != nil {
 					return nil, err
 				}
-				declarators, err := p.parseDeclarators(tbl, ast.NewDeclaratorWithClassName(classType, dimension))
+				declarators, err := p.ParseDeclarators(tbl, ast.NewDeclaratorWithClassName(classType, dimension))
 				return declarators, err
 			}
 		}
@@ -711,9 +712,9 @@ func (p *Parser) parseDeclarationOrExpression(tbl *SymbolTable, exprList bool) (
 		var expr *ast.Statement
 		var err error
 		if exprList {
-			expr, err = p.parseExprList(tbl)
+			expr, err = p.ParseExprList(tbl)
 		} else {
-			node, err := p.parseExpression(tbl)
+			node, err := p.ParseExpression(tbl)
 			if err != nil {
 				return nil, err
 			}
@@ -728,7 +729,7 @@ func (p *Parser) parseDeclarationOrExpression(tbl *SymbolTable, exprList bool) (
 	}
 }
 
-func (p *Parser) parseDeclarators(tbl *SymbolTable, d *ast.Declarator) (*ast.Statement, error) {
+func (p *Parser) ParseDeclarators(tbl *SymbolTable, d *ast.Declarator) (*ast.Statement, error) {
 	var decl *ast.Statement
 
 	for {
@@ -757,14 +758,14 @@ func (p *Parser) ParseDeclarator(tbl *SymbolTable, d *ast.Declarator) (*ast.Decl
 	}
 	name := p.getString()
 	symbol := ast.NewSymbol(name)
-	dim, err := p.parseArrayDimension()
+	dim, err := p.ParseArrayDimension()
 	if err != nil {
 		return nil, err
 	}
 	var init ast.Node
 	if p.lookAHeadToken().Value == "=" {
 		p.getToken()
-		init, err = p.parseInitializer(tbl)
+		init, err = p.ParseInitializer(tbl)
 		if err != nil {
 			return nil, err
 		}
@@ -775,30 +776,30 @@ func (p *Parser) ParseDeclarator(tbl *SymbolTable, d *ast.Declarator) (*ast.Decl
 
 }
 
-func (p *Parser) parseInitializer(tbl *SymbolTable) (ast.Node, error) {
+func (p *Parser) ParseInitializer(tbl *SymbolTable) (ast.Node, error) {
 	if p.lookAHeadToken().Value == "{" {
-		return p.parseArrayInitializer(tbl)
+		return p.ParseArrayInitializer(tbl)
 	}
-	return p.parseExpression(tbl)
+	return p.ParseExpression(tbl)
 }
 
 /* array.initializer :
  *  '{' (( array.initializer | expression ) ',')* '}'
  */
-func (p *Parser) parseArrayInitializer(tbl *SymbolTable) (*ast.ArrayInit, error) {
+func (p *Parser) ParseArrayInitializer(tbl *SymbolTable) (*ast.ArrayInit, error) {
 	p.getToken() // '{'
 	if p.lookAHeadToken().Value == "}" {
 		p.getToken()
 		return ast.NewArrayInit(nil), nil
 	}
-	expr, err := p.parseExpression(tbl)
+	expr, err := p.ParseExpression(tbl)
 	if err != nil {
 		return nil, err
 	}
 	init := ast.NewArrayInit(expr)
 	for p.lookAHeadToken().Value == "," {
 		p.getToken()
-		expr, err = p.parseExpression(tbl)
+		expr, err = p.ParseExpression(tbl)
 		if err != nil {
 			return nil, err
 		}
@@ -812,8 +813,8 @@ func (p *Parser) parseArrayInitializer(tbl *SymbolTable) (*ast.ArrayInit, error)
 
 /* par.expression : '(' expression ')'
  */
-func (p *Parser) parseExpression(tbl *SymbolTable) (ast.Node, error) {
-	left, err := p.parseConditionalExpr(tbl)
+func (p *Parser) ParseExpression(tbl *SymbolTable) (ast.Node, error) {
+	left, err := p.ParseConditionalExpr(tbl)
 	if err != nil {
 		return nil, err
 	}
@@ -822,7 +823,7 @@ func (p *Parser) parseExpression(tbl *SymbolTable) (ast.Node, error) {
 		return left, nil
 	}
 	t := p.getToken()
-	right, err := p.parseExpression(tbl)
+	right, err := p.ParseExpression(tbl)
 	if err != nil {
 		return nil, err
 	}
@@ -856,10 +857,10 @@ func (p *Parser) nextIsClassType(i int) int {
 	}
 }
 
-func (p *Parser) parseExprList(tbl *SymbolTable) (*ast.Statement, error) {
+func (p *Parser) ParseExprList(tbl *SymbolTable) (*ast.Statement, error) {
 	var expr *ast.Statement
 	for {
-		expression, err := p.parseExpression(tbl)
+		expression, err := p.ParseExpression(tbl)
 		if err != nil {
 			return nil, err
 		}
@@ -877,21 +878,21 @@ func (p *Parser) parseExprList(tbl *SymbolTable) (*ast.Statement, error) {
 /* conditional.expr                 (right-to-left)
  *     : logical.or.expr [ '?' expression ':' conditional.expr ]
  */
-func (p *Parser) parseConditionalExpr(tbl *SymbolTable) (ast.Node, error) {
-	cond, err := p.parseBinaryExpr(tbl)
+func (p *Parser) ParseConditionalExpr(tbl *SymbolTable) (ast.Node, error) {
+	cond, err := p.ParseBinaryExpr(tbl)
 	if err != nil {
 		return nil, err
 	}
 	if p.lookAHeadToken().Value == "?" {
 		p.getToken()
-		thenExpr, err := p.parseExpression(tbl)
+		thenExpr, err := p.ParseExpression(tbl)
 		if err != nil {
 			return nil, err
 		}
 		if p.getToken().Value == ":" {
 			return nil, fmt.Errorf(p.syanxError() + "cause: ':' is missing.")
 		}
-		elseExpr, err := p.parseExpression(tbl)
+		elseExpr, err := p.ParseExpression(tbl)
 		if err != nil {
 			return nil, err
 		}
@@ -943,8 +944,8 @@ func (p *Parser) parseConditionalExpr(tbl *SymbolTable) (ast.Node, error) {
  * | multiply.expr ("*" | "/" | "%") unary.expr
  */
 
-func (p *Parser) parseBinaryExpr(tbl *SymbolTable) (ast.Node, error) {
-	expr, err := p.parseUnaryExpr(tbl)
+func (p *Parser) ParseBinaryExpr(tbl *SymbolTable) (ast.Node, error) {
+	expr, err := p.ParseUnaryExpr(tbl)
 	if err != nil {
 		return nil, err
 	}
@@ -972,7 +973,7 @@ func (p *Parser) parseBinaryExpr(tbl *SymbolTable) (ast.Node, error) {
    "+", "-", "++", or "--".
 */
 
-func (p *Parser) parseUnaryExpr(tbl *SymbolTable) (ast.Node, error) {
+func (p *Parser) ParseUnaryExpr(tbl *SymbolTable) (ast.Node, error) {
 	var t Token
 	switch p.lookAHeadToken().Value {
 	case "+", "-", "++", "--", "!", "~":
@@ -998,23 +999,23 @@ func (p *Parser) parseUnaryExpr(tbl *SymbolTable) (ast.Node, error) {
 				break
 			}
 		}
-		expr, err := p.parseUnaryExpr(tbl)
+		expr, err := p.ParseUnaryExpr(tbl)
 		if err != nil {
 			return nil, err
 		}
 		return ast.MakeExpressionSingle(t.ID, expr), nil
 	case "(":
-		return p.parseCast(tbl)
+		return p.ParseCast(tbl)
 	default:
-		return p.parsePostfix(tbl)
+		return p.ParsePostfix(tbl)
 	}
 }
 
-func (p *Parser) parseParExpression(tbl *SymbolTable) (ast.Node, error) {
+func (p *Parser) ParseParExpression(tbl *SymbolTable) (ast.Node, error) {
 	if p.getToken().Value != "(" {
 		return nil, fmt.Errorf(p.syanxError() + "cause: '(' is missing.")
 	}
-	expr, err := p.parseExpression(tbl)
+	expr, err := p.ParseExpression(tbl)
 	if err != nil {
 		return nil, err
 	}
@@ -1027,9 +1028,9 @@ func (p *Parser) parseParExpression(tbl *SymbolTable) (ast.Node, error) {
 func (p *Parser) binaryExpr2(tbl *SymbolTable, expr ast.Node, prec int) (ast.Node, error) {
 	t := p.getToken()
 	if t.ID == ast.Instanceof {
-		return p.parseInstanceOf(tbl, expr)
+		return p.ParseInstanceOf(tbl, expr)
 	}
-	expr2, err := p.parseUnaryExpr(tbl)
+	expr2, err := p.ParseUnaryExpr(tbl)
 	var newErr error
 	if err != nil {
 		return nil, err
@@ -1048,64 +1049,64 @@ func (p *Parser) binaryExpr2(tbl *SymbolTable, expr ast.Node, prec int) (ast.Nod
 	}
 }
 
-func (p *Parser) parseInstanceOf(tbl *SymbolTable, expr ast.Node) (ast.Node, error) {
+func (p *Parser) ParseInstanceOf(tbl *SymbolTable, expr ast.Node) (ast.Node, error) {
 	t := p.lookAHeadToken()
 	if t.ID.IsBasicType() {
 		p.getToken()
-		dimension, err := p.parseArrayDimension()
+		dimension, err := p.ParseArrayDimension()
 		if err != nil {
 			return nil, err
 		}
 		return ast.NewInstanceOfExprWithType(t.ID, dimension, expr), nil
 	}
-	className, err := p.parseClassType(tbl)
+	className, err := p.ParseClassType(tbl)
 	if err != nil {
 		return nil, err
 	}
-	dim, err := p.parseArrayDimension()
+	dim, err := p.ParseArrayDimension()
 	if err != nil {
 		return nil, err
 	}
 	return ast.NewInstanceOfExprWithClass(className, dim, expr), nil
 }
 
-func (p *Parser) parseCast(tbl *SymbolTable) (ast.Node, error) {
+func (p *Parser) ParseCast(tbl *SymbolTable) (ast.Node, error) {
 	t := p.lookHeadNToken(2)
 	if t.ID.IsBasicType() && p.nextIsBuiltinCast() {
 		p.getToken() // '('
 		p.getToken() // primitive type
-		dim, err := p.parseArrayDimension()
+		dim, err := p.ParseArrayDimension()
 		if err != nil {
 			return nil, err
 		}
 		if p.getToken().Value != ")" {
 			return nil, fmt.Errorf(p.syanxError() + "cause: ')' is missing.")
 		}
-		expr, err := p.parseUnaryExpr(tbl)
+		expr, err := p.ParseUnaryExpr(tbl)
 		if err != nil {
 			return nil, err
 		}
 		return ast.NewCastExprWithType(t.ID, dim, expr), nil
 	} else if t.ID == ast.Identifier && p.nextIsClassCast() {
 		p.getToken() // '('
-		className, err := p.parseClassType(tbl)
+		className, err := p.ParseClassType(tbl)
 		if err != nil {
 			return nil, err
 		}
-		dim, err := p.parseArrayDimension()
+		dim, err := p.ParseArrayDimension()
 		if err != nil {
 			return nil, err
 		}
 		if p.getToken().Value != ")" {
 			return nil, fmt.Errorf(p.syanxError() + "cause: ')' is missing.")
 		}
-		expr, err := p.parseUnaryExpr(tbl)
+		expr, err := p.ParseUnaryExpr(tbl)
 		if err != nil {
 			return nil, err
 		}
 		return ast.NewCastExprWithClass(className, dim, expr), nil
 	} else {
-		return p.parsePostfix(tbl)
+		return p.ParsePostfix(tbl)
 	}
 }
 
@@ -1139,7 +1140,7 @@ func (p *Parser) nextIsClassCast() bool {
 	return token.Value == "(" || token.ID == ast.Null || token.ID == ast.StringL || token.ID == ast.Identifier || token.ID == ast.This || token.ID == ast.Super || token.ID == ast.New || token.ID == ast.True || token.ID == ast.False || token.ID == ast.LongConstant || token.ID == ast.IntConstant || token.ID == ast.CharConstant || token.ID == ast.DoubleConstant || token.ID == ast.FloatConstant
 }
 
-func (p *Parser) parsePostfix(tbl *SymbolTable) (ast.Node, error) {
+func (p *Parser) ParsePostfix(tbl *SymbolTable) (ast.Node, error) {
 	token := p.lookAHeadToken()
 	switch token.ID {
 	case ast.LongConstant, ast.IntConstant, ast.CharConstant:
@@ -1160,7 +1161,7 @@ func (p *Parser) parsePostfix(tbl *SymbolTable) (ast.Node, error) {
 		break
 	}
 	var index ast.Node
-	expr, err := p.parsePrimaryExpr(tbl)
+	expr, err := p.ParsePrimaryExpr(tbl)
 	if err != nil {
 		return nil, err
 	}
@@ -1168,26 +1169,26 @@ func (p *Parser) parsePostfix(tbl *SymbolTable) (ast.Node, error) {
 	for {
 		switch p.lookAHeadToken().Value {
 		case "(":
-			expr, err = p.parseMethodCall(tbl, expr)
+			expr, err = p.ParseMethodCall(tbl, expr)
 			if err != nil {
 				return nil, err
 			}
 			break
 		case "[":
 			if p.lookHeadNToken(2).Value == "]" {
-				dim, err := p.parseArrayDimension()
+				dim, err := p.ParseArrayDimension()
 				if err != nil {
 					return nil, err
 				}
 				if p.getToken().Value != "." || p.getToken().ID != ast.Class {
 					return nil, fmt.Errorf(p.syanxError())
 				}
-				expr, err = p.parseDotClass(expr, dim)
+				expr, err = p.ParseDotClass(expr, dim)
 				if err != nil {
 					return nil, err
 				}
 			} else {
-				index, err = p.parseArrayIndex(tbl)
+				index, err = p.ParseArrayIndex(tbl)
 				if err != nil || index == nil {
 					return nil, fmt.Errorf(p.syanxError())
 				}
@@ -1202,7 +1203,7 @@ func (p *Parser) parsePostfix(tbl *SymbolTable) (ast.Node, error) {
 			p.getToken()
 			t = p.getToken()
 			if t.ID == ast.Class {
-				expr, err = p.parseDotClass(expr, 0)
+				expr, err = p.ParseDotClass(expr, 0)
 				if err != nil {
 					return nil, err
 				}
@@ -1246,7 +1247,7 @@ func (p *Parser) parsePostfix(tbl *SymbolTable) (ast.Node, error) {
  * Identifier represents either a local variable name, a member name,
  * or a class name.
  */
-func (p *Parser) parsePrimaryExpr(tbl *SymbolTable) (ast.Node, error) {
+func (p *Parser) ParsePrimaryExpr(tbl *SymbolTable) (ast.Node, error) {
 	t := p.getToken()
 	var decl *ast.Declarator
 	switch t.ID {
@@ -1264,10 +1265,10 @@ func (p *Parser) parsePrimaryExpr(tbl *SymbolTable) (ast.Node, error) {
 	case ast.StringL:
 		return ast.NewStringL(p.getString()), nil
 	case ast.New:
-		return p.parseNew(tbl)
+		return p.ParseNew(tbl)
 	default:
 		if t.Value == "(" {
-			expr, err := p.parseExpression(tbl)
+			expr, err := p.ParseExpression(tbl)
 			if err != nil {
 				return nil, err
 			}
@@ -1277,53 +1278,53 @@ func (p *Parser) parsePrimaryExpr(tbl *SymbolTable) (ast.Node, error) {
 			return expr, nil
 		}
 		if t.ID.IsBasicType() || t.ID == ast.Void {
-			dim, err := p.parseArrayDimension()
+			dim, err := p.ParseArrayDimension()
 			if err != nil {
 				return nil, err
 			}
 			if p.getToken().Value == "." && p.getToken().ID == ast.Class {
-				return p.parseDotClassbuiltinType(t.ID, dim)
+				return p.ParseDotClassbuiltinType(t.ID, dim)
 			}
 		}
 		return nil, fmt.Errorf(p.syanxError())
 	}
 }
 
-func (p *Parser) parseNew(tbl *SymbolTable) (*ast.NewExpr, error) {
+func (p *Parser) ParseNew(tbl *SymbolTable) (*ast.NewExpr, error) {
 	var init *ast.ArrayInit
 	t := p.lookAHeadToken()
 	if t.ID.IsBasicType() {
 		p.getToken()
-		size, err := p.parseArraySize(tbl)
+		size, err := p.ParseArraySize(tbl)
 		if err != nil {
 			return nil, err
 		}
 		if p.lookAHeadToken().Value == "{" {
-			init, err = p.parseArrayInitializer(tbl)
+			init, err = p.ParseArrayInitializer(tbl)
 			if err != nil {
 				return nil, err
 			}
 		}
 		return ast.NewNewExprWithType(t.ID, size, init), nil
 	} else if t.ID == ast.Identifier {
-		className, err := p.parseClassType(tbl)
+		className, err := p.ParseClassType(tbl)
 		if err != nil {
 			return nil, err
 		}
 		t = p.lookAHeadToken()
 		if t.Value == "(" {
-			args, err := p.parseArgumentList(tbl)
+			args, err := p.ParseArgumentList(tbl)
 			if err != nil {
 				return nil, err
 			}
 			return ast.NewNewExprWithClass(className, args), nil
 		} else if t.Value == "[" {
-			size, err := p.parseArraySize(tbl)
+			size, err := p.ParseArraySize(tbl)
 			if err != nil {
 				return nil, err
 			}
 			if p.lookAHeadToken().Value == "{" {
-				init, err = p.parseArrayInitializer(tbl)
+				init, err = p.ParseArrayInitializer(tbl)
 				if err != nil {
 					return nil, err
 				}
@@ -1334,10 +1335,10 @@ func (p *Parser) parseNew(tbl *SymbolTable) (*ast.NewExpr, error) {
 	return nil, fmt.Errorf(p.syanxError())
 }
 
-func (p *Parser) parseArraySize(tbl *SymbolTable) (*ast.ASTList, error) {
+func (p *Parser) ParseArraySize(tbl *SymbolTable) (*ast.ASTList, error) {
 	var list *ast.ASTList
 	for p.lookAHeadToken().Value == "[" {
-		item, err := p.parseArrayIndex(tbl)
+		item, err := p.ParseArrayIndex(tbl)
 		if err != nil {
 			return nil, err
 		}
@@ -1346,13 +1347,13 @@ func (p *Parser) parseArraySize(tbl *SymbolTable) (*ast.ASTList, error) {
 	return list, nil
 }
 
-func (p *Parser) parseArrayIndex(tbl *SymbolTable) (ast.Node, error) {
+func (p *Parser) ParseArrayIndex(tbl *SymbolTable) (ast.Node, error) {
 	p.getToken() // '['
 	if p.lookAHeadToken().Value == "]" {
 		p.getToken()
 		return nil, nil
 	}
-	index, err := p.parseExpression(tbl)
+	index, err := p.ParseExpression(tbl)
 	if err != nil {
 		return nil, err
 	}
@@ -1362,14 +1363,14 @@ func (p *Parser) parseArrayIndex(tbl *SymbolTable) (ast.Node, error) {
 	return index, nil
 }
 
-func (p *Parser) parseArgumentList(tbl *SymbolTable) (*ast.ASTList, error) {
+func (p *Parser) ParseArgumentList(tbl *SymbolTable) (*ast.ASTList, error) {
 	if p.getToken().Value != "(" {
 		return nil, fmt.Errorf(p.syanxError() + "cause: '(' is missing.")
 	}
 	var list *ast.ASTList
 	if p.lookAHeadToken().Value != ")" {
 		for {
-			expr, err := p.parseExpression(tbl)
+			expr, err := p.ParseExpression(tbl)
 			if err != nil {
 				return nil, err
 			}
@@ -1387,7 +1388,7 @@ func (p *Parser) parseArgumentList(tbl *SymbolTable) (*ast.ASTList, error) {
 	return list, nil
 }
 
-func (p *Parser) parseDotClassbuiltinType(builtinType ast.TokenID, dim int) (ast.Node, error) {
+func (p *Parser) ParseDotClassbuiltinType(builtinType ast.TokenID, dim int) (ast.Node, error) {
 	if dim > 0 {
 		cname := toJvmTypeName(builtinType, dim)
 		return ast.MakeExpression(ast.Dot, ast.NewSymbol(cname), ast.NewMemberSymbol("class")), nil
@@ -1432,7 +1433,7 @@ func (p *Parser) parseDotClassbuiltinType(builtinType ast.TokenID, dim int) (ast
  *             | postfix.expr "." Identifier
  *             | postfix.expr "#" Identifier
  */
-func (p *Parser) parseMethodCall(tbl *SymbolTable, expr ast.Node) (ast.Node, error) {
+func (p *Parser) ParseMethodCall(tbl *SymbolTable, expr ast.Node) (ast.Node, error) {
 	if key, ok := expr.(*ast.Keyword); ok {
 		id := key.TokenID
 		if id != ast.This && id != ast.Super {
@@ -1445,7 +1446,7 @@ func (p *Parser) parseMethodCall(tbl *SymbolTable, expr ast.Node) (ast.Node, err
 			return nil, fmt.Errorf(p.syanxError())
 		}
 	}
-	args, err := p.parseArgumentList(tbl)
+	args, err := p.ParseArgumentList(tbl)
 	if err != nil {
 		return nil, err
 	}
@@ -1456,7 +1457,7 @@ func (p *Parser) parseMethodCall(tbl *SymbolTable, expr ast.Node) (ast.Node, err
  * String.class   => ('.' "String" "class")
  * String[].class => ('.' "[LString;" "class")
  */
-func (p *Parser) parseDotClass(className ast.Node, dim int) (ast.Node, error) {
+func (p *Parser) ParseDotClass(className ast.Node, dim int) (ast.Node, error) {
 	cname, err := toClassName(className)
 	if err != nil {
 		return nil, fmt.Errorf(p.syanxError() + "cause: " + err.Error())
@@ -1476,5 +1477,5 @@ func (p *Parser) parseDotClass(className ast.Node, dim int) (ast.Node, error) {
 }
 
 func (p *Parser) HasMore() bool {
-	return p.lex.HasNextToken()
+	return p.lookAHeadToken() != EOFToken
 }

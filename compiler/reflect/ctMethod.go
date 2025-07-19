@@ -119,6 +119,9 @@ func (m *CtMethod) GetCodeAttribute() *classfile.CodeAttribute {
 		if codeAttr, ok := attr.(*classfile.CodeAttribute); ok {
 			return codeAttr
 		}
+		if codeAttr, ok := attr.(classfile.CodeAttribute); ok {
+			return &codeAttr
+		}
 	}
 	return nil
 }

@@ -16,6 +16,54 @@ type ConstPool struct {
 	thisClassInfo int
 }
 
+func NewConstPool(thisClass *CtClass, entries []classfile.ConstantInfo) *ConstPool {
+	cache := make(map[string]int)
+	for i, entry := range entries {
+		switch entry.(type) {
+		case classfile.ConstantNameAndTypeInfo:
+			info := entry.(classfile.ConstantNameAndTypeInfo)
+			name := entries[info.NameIndex]
+			desc := entries[info.DescriptorIndex]
+			key := fmt.Sprintf("%s:%s", name, desc)
+			cache[key] = i
+			break
+		case []uint8:
+			info := entry.([]uint8)
+			cache[string(info)] = i
+			break
+		case classfile.ConstantMethodRefInfo:
+			info := entry.(classfile.ConstantMethodRefInfo)
+			key := fmt.Sprintf("@[MethodRefInfo-%d:%d", info.ClassIndex, info.NameAndTypeIndex)
+			cache[key] = i
+			break
+		case classfile.ConstantInterfaceMethodRefInfo:
+			info := entry.(classfile.ConstantInterfaceMethodRefInfo)
+			key := fmt.Sprintf("@[InterfaceMethodRefInfo-%d:%d", info.ClassIndex, info.NameAndTypeIndex)
+			cache[key] = i
+			break
+		case classfile.ConstantClassInfo:
+			info := entry.(classfile.ConstantClassInfo)
+			key := fmt.Sprintf("@ConstantClassInfo-%d", info.NameIndex)
+			cache[key] = i
+			break
+		case classfile.ConstantStringInfo:
+			info := entry.(classfile.ConstantStringInfo)
+			key := fmt.Sprintf("@StringRef-%d", info.StringIndex)
+			cache[key] = i
+			break
+		}
+
+	}
+
+	return &ConstPool{
+		entries:       entries,
+		top:           len(entries) - 1,
+		This:          thisClass,
+		cache:         cache,
+		thisClassInfo: 0,
+	}
+}
+
 func (p *ConstPool) GetPool() []classfile.ConstantInfo {
 	return p.entries
 }
@@ -48,9 +96,15 @@ func NewExceptionAttribute() *classfile.ExceptionsAttribute {
 }
 
 func (p *ConstPool) AddClassInfo(jvmType string) int {
+	key := fmt.Sprintf("@ClassInfo-%s", jvmType)
+	if _, ok := p.cache[key]; ok {
+		return p.cache[key]
+	}
 	nameIdx := p.AddString(strings.ReplaceAll(jvmType, ".", "/"))
 	info := classfile.ConstantClassInfo{NameIndex: uint16(nameIdx)}
-	return p.AddConstantClassInfo(info)
+	classInfo := p.AddConstantClassInfo(info)
+	p.cache[key] = classInfo
+	return classInfo
 }
 
 func (p *ConstPool) AddMethodRefInfo(index int, name string, d string) int {
@@ -115,9 +169,9 @@ func (p *ConstPool) AddInterfaceMethodRefInfo0(clazz int, nt int) int {
 }
 
 func (p *ConstPool) AddClassInfo0(class *CtClass) int {
-	if class == p.This {
-		return p.thisClassInfo
-	}
+	//if class.QualifiedName == p.This.QualifiedName {
+	//	return p.thisClassInfo
+	//}
 	if !class.IsArray() {
 		return p.AddClassInfo(class.QualifiedName)
 	}
@@ -175,9 +229,15 @@ func (p *ConstPool) AddStringRef(s string) int {
 	return idx
 }
 
-func (p *ConstPool) AddFieldrefInfo(classInfo int, name string, descriptor string) int {
+func (p *ConstPool) AddFieldRefInfo(classInfo int, name string, descriptor string) int {
+	key := fmt.Sprintf("@FieldRefInfo-%d-%s", classInfo, name)
+	if idx, exists := p.cache[key]; exists {
+		return idx
+	}
 	nt := p.AddNameAndTypeInfo(name, descriptor)
-	return p.addFieldrefInfo(classInfo, nt)
+	info := p.addFieldrefInfo(classInfo, nt)
+	p.cache[key] = info
+	return info
 }
 
 func (p *ConstPool) addFieldrefInfo(info int, nt int) int {

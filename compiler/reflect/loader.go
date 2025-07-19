@@ -10,14 +10,14 @@ import (
 var bootLoader *ClassLoader
 var DefaultPool *ClassPool
 
-func init() {
+func InitClassPool() {
 	bootLoader = NewClassLoader(nil)
 	libClassPath, err := NewClasspathFromFS(lib.RtJar, "rt.jar")
 	if err == nil {
 		bootLoader.AddClassPath(libClassPath)
 		bootLoader.LoadClassPaths()
 	}
-	DefaultPool = NewClassPool(nil)
+	DefaultPool = NewClassPool(nil, bootLoader)
 }
 
 type ClassLoader struct {

@@ -1,6 +1,8 @@
 package compiler
 
 import (
+	"fmt"
+	"github.com/Yyjccc/GoJavassist/classfile"
 	"github.com/Yyjccc/GoJavassist/compiler/ast"
 	"github.com/Yyjccc/GoJavassist/compiler/reflect"
 )
@@ -34,6 +36,8 @@ func CompileMethod(class *reflect.CtClass, src string) (*reflect.CtMethod, error
 	if err != nil {
 		return nil, err
 	}
+	bytes := compiler.gen.bytecodes.InstructionsToBytes()
+	fmt.Println(len(bytes) == len(compiler.gen.bytecodes.codes))
 	return compiler.gen.thisMethod, nil
 }
 
@@ -43,7 +47,7 @@ func MakeCtMethod(src string, class *reflect.CtClass) (*reflect.CtMethod, error)
 
 func (compiler *Javac) compile(src string) error {
 	p := NewParser(src)
-	mem, isMethod, err := p.parseMember1(compiler.table)
+	mem, isMethod, err := p.ParseMember1(compiler.table)
 	if err != nil {
 		return err
 	}
@@ -75,7 +79,7 @@ func (compiler *Javac) compileMethod(p *Parser, md *ast.MethodDecl) error {
 	}
 
 	compiler.gen.recordParams(plist, acc.Static, "$", "$args", "$$", !acc.Static, 0, JavaToJvmName(compiler.gen.thisClass.QualifiedName), compiler.table)
-	md, err = p.parseMethod2(compiler.table, md)
+	md, err = p.ParseMethod2(compiler.table, md)
 	if err != nil {
 		return err
 	}
@@ -95,7 +99,7 @@ func (compiler *Javac) compileMethod(p *Parser, md *ast.MethodDecl) error {
 		if err != nil {
 			return err
 		}
-		compiler.recordReturnType(rType, false)
+		compiler.RecordReturnType(rType, false)
 		method := reflect.NewCtMethodInfo(rType, r.GetVariable().Identifier, plist, compiler.gen.thisClass)
 		method.SetModifiers(acc)
 		compiler.gen.thisMethod = method
@@ -119,17 +123,17 @@ func (compiler *Javac) compileMethod(p *Parser, md *ast.MethodDecl) error {
 
 func (compiler *Javac) CompileBody(method *reflect.CtMethod, src string) error {
 	mod := method.Acc
-	compiler.recordParams(method.GetParameterTypes(), mod.Static)
+	compiler.RecordParams(method.GetParameterTypes(), mod.Static)
 	compiler.gen.SetThisMethod(method)
 	rType := method.GetReturnType()
-	compiler.recordReturnType(rType, false)
+	compiler.RecordReturnType(rType, false)
 	isVoid := rType == reflect.VoidType
 	if src == "" {
 
 	} else {
 		p := NewParser(src)
 		stb := NewSymbolTable(compiler.table)
-		s, err := p.parseStatement(stb)
+		s, err := p.ParseStatement(stb)
 		if err != nil {
 			return err
 		}
@@ -147,7 +151,7 @@ func (compiler *Javac) CompileBody(method *reflect.CtMethod, src string) error {
 	return nil
 }
 
-func (compiler *Javac) recordReturnType(rType *reflect.CtClass, useResultVar bool) int {
+func (compiler *Javac) RecordReturnType(rType *reflect.CtClass, useResultVar bool) int {
 	compiler.gen.recordType(rType)
 	name := ""
 	if useResultVar {
@@ -156,6 +160,55 @@ func (compiler *Javac) recordReturnType(rType *reflect.CtClass, useResultVar boo
 	return compiler.gen.recordReturnType(rType, "$r", name, compiler.table)
 }
 
-func (compiler *Javac) recordParams(params []*reflect.CtClass, isStatic bool) int {
+func (compiler *Javac) RecordParams(params []*reflect.CtClass, isStatic bool) int {
 	return compiler.gen.recordParams(params, isStatic, "$", "$args", "$$", !isStatic, 0, compiler.gen.GetThisName(), compiler.table)
+}
+
+func (j *Javac) RecordLocalVariables(ca *classfile.CodeAttribute, pc int) bool {
+	var va *classfile.LocalVariableTableAttribute
+	for _, attr := range ca.AttributeTable {
+		if atrribute, ok := attr.(classfile.LocalVariableTableAttribute); ok {
+			va = &atrribute
+		}
+	}
+	if va == nil {
+		return false
+	}
+	n := len(va.LocalVariableTable)
+	pool := j.gen.thisClass.GetConstPool().GetPool()
+	for i := 0; i < n; i++ {
+		start := int(va.StartPc(i))
+		length := int(va.LocalVariableTable[i].Length)
+		if start <= pc && pc < start+length {
+			desc := string(pool[va.LocalVariableTable[i].DescriptorIndex].([]byte))
+			name := string(pool[va.LocalVariableTable[i].NameIndex].([]byte))
+			j.gen.recordVariable(desc, name, int(va.LocalVariableTable[i].Index), j.table)
+		}
+	}
+	return true
+}
+
+func (j *Javac) CompileStmnt(src string) error {
+	p := NewParser(src)
+	stb := NewSymbolTable(j.table)
+	for p.HasMore() {
+		s, err := p.ParseStatement(stb)
+		if err != nil {
+			return err
+		}
+		err = s.Accept(j.gen)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func NewJavacWithByteCodes(b *ByteCodes, class *reflect.CtClass) *Javac {
+	j := &Javac{
+		table: NewSymbolTable(nil),
+		gen:   NewJvtCodeGenerator(class),
+	}
+	j.gen.bytecodes = b
+	return j
 }

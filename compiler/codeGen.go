@@ -89,7 +89,7 @@ func (g *CCodeGenerator) GetBytecodes() *ByteCodes {
 func (g *CCodeGenerator) AtStringL(s *ast.StringLiteral) error {
 	g.exprType = ast.Class
 	g.arrayDim = 0
-	g.bytecodes.addLdc(g.bytecodes.AddStringRef(s.Text))
+	g.bytecodes.AddLdc(g.bytecodes.AddStringRef(s.Text))
 	return nil
 }
 
@@ -102,10 +102,10 @@ func (g *CCodeGenerator) AtIntConst(i *ast.IntConst) error {
 		} else {
 			g.exprType = ast.Char
 		}
-		g.bytecodes.addIconst(int(i.Value))
+		g.bytecodes.AddIconst(int(i.Value))
 	} else {
 		g.exprType = ast.Long
-		g.bytecodes.addLconst(i.Value)
+		g.bytecodes.AddLconst(i.Value)
 	}
 	return nil
 }
@@ -114,10 +114,10 @@ func (g *CCodeGenerator) AtDoubleConst(d *ast.DoubleConst) error {
 	g.arrayDim = 0
 	if d.GetType() == ast.DoubleConstant {
 		g.exprType = ast.Double
-		g.bytecodes.addDconst(d.Value)
+		g.bytecodes.AddDconst(d.Value)
 	} else {
 		g.exprType = ast.Float
-		g.bytecodes.addFconst(float32(d.Value))
+		g.bytecodes.AddFconst(float32(d.Value))
 	}
 	return nil
 }
@@ -127,26 +127,29 @@ func (g *CCodeGenerator) AtKeyword(k *ast.Keyword) error {
 	tokenID := k.TokenID
 	switch tokenID {
 	case ast.True:
-		g.bytecodes.addIconst(1)
+		g.bytecodes.AddIconst(1)
 		g.exprType = ast.Boolean
 		break
 	case ast.False:
-		g.bytecodes.addIconst(0)
+		g.bytecodes.AddIconst(0)
 		g.exprType = ast.Boolean
 		break
 	case ast.Null:
 		g.bytecodes.AddOpcode(classfile.OpAConstNull)
 		g.exprType = ast.Null
 		break
-	case ast.This:
-	case ast.Super:
+	case ast.This, ast.Super:
 		if g.isStaticMethod {
 			return NewCompileError("not-available:" + tokenID.GetName())
 		}
-		g.bytecodes.addAload(0)
+		g.bytecodes.AddAload(0)
 		g.exprType = ast.Class
-		//getThisName()
-		//getSuperName()
+		if tokenID == ast.This {
+			g.className = g.Parent.GetThisName()
+		} else {
+			g.className = g.Parent.GetSuperName()
+		}
+
 		break
 	default:
 		return NewCompileError("fatal,unknown-token:" + tokenID.GetName())
@@ -164,23 +167,23 @@ func (g *CCodeGenerator) AtVariable(v *ast.Variable) error {
 	g.className = d.GetClassName()
 	varIndex := g.getLocalVar(d)
 	if g.arrayDim > 0 {
-		g.bytecodes.addAload(varIndex)
+		g.bytecodes.AddAload(varIndex)
 	} else {
 		switch g.exprType {
 		case ast.Class:
-			g.bytecodes.addAload(varIndex)
+			g.bytecodes.AddAload(varIndex)
 			break
 		case ast.Long:
 			g.bytecodes.AddLload(varIndex)
 			break
 		case ast.Float:
-			g.bytecodes.addFload(varIndex)
+			g.bytecodes.AddFload(varIndex)
 			break
 		case ast.Double:
-			g.bytecodes.addDload(varIndex)
+			g.bytecodes.AddDload(varIndex)
 			break
 		default: // BOOLEAN, BYTE, CHAR, SHORT, INT
-			g.bytecodes.addIload(varIndex)
+			g.bytecodes.AddIload(varIndex)
 			break
 		}
 	}
@@ -362,11 +365,11 @@ func (g *CCodeGenerator) atPlusPlus(token ast.TokenID, oprand ast.Node, expr *as
 		}
 		switch t {
 		case ast.Double:
-			g.bytecodes.addDload(varIndex)
+			g.bytecodes.AddDload(varIndex)
 			if doDup && isPost {
 				g.bytecodes.AddOpcode(classfile.OpDup2)
 			}
-			g.bytecodes.addDconst(1.0)
+			g.bytecodes.AddDconst(1.0)
 			if token == ast.PLUSPLUS {
 				g.bytecodes.AddOpcode(classfile.OpDAdd)
 			} else {
@@ -375,14 +378,14 @@ func (g *CCodeGenerator) atPlusPlus(token ast.TokenID, oprand ast.Node, expr *as
 			if doDup && isPost {
 				g.bytecodes.AddOpcode(classfile.OpDup2)
 			}
-			g.bytecodes.addDstore(varIndex)
+			g.bytecodes.AddDstore(varIndex)
 			return nil
 		case ast.Float:
-			g.bytecodes.addFload(varIndex)
+			g.bytecodes.AddFload(varIndex)
 			if doDup && isPost {
 				g.bytecodes.AddOpcode(classfile.OpDup)
 			}
-			g.bytecodes.addFconst(1.0)
+			g.bytecodes.AddFconst(1.0)
 			if token == ast.PLUSPLUS {
 				g.bytecodes.AddOpcode(classfile.OpFAdd)
 			} else {
@@ -391,14 +394,14 @@ func (g *CCodeGenerator) atPlusPlus(token ast.TokenID, oprand ast.Node, expr *as
 			if doDup && isPost {
 				g.bytecodes.AddOpcode(classfile.OpDup)
 			}
-			g.bytecodes.addFstore(varIndex)
+			g.bytecodes.AddFstore(varIndex)
 			return nil
 		case ast.Long:
 			g.bytecodes.AddLload(varIndex)
 			if doDup && isPost {
 				g.bytecodes.AddOpcode(classfile.OpDup2)
 			}
-			g.bytecodes.addLconst(1)
+			g.bytecodes.AddLconst(1)
 			if token == ast.PLUSPLUS {
 				g.bytecodes.AddOpcode(classfile.OpLAdd)
 			} else {
@@ -407,14 +410,14 @@ func (g *CCodeGenerator) atPlusPlus(token ast.TokenID, oprand ast.Node, expr *as
 			if doDup && isPost {
 				g.bytecodes.AddOpcode(classfile.OpDup2)
 			}
-			g.bytecodes.addLstore(varIndex)
+			g.bytecodes.AddLstore(varIndex)
 			return nil
 		case ast.Byte:
 		case ast.Char:
 		case ast.Short:
 		case ast.Int:
 			if doDup && isPost {
-				g.bytecodes.addIload(varIndex)
+				g.bytecodes.AddIload(varIndex)
 			}
 			delta := -1
 			if token == ast.PLUSPLUS {
@@ -428,7 +431,7 @@ func (g *CCodeGenerator) atPlusPlus(token ast.TokenID, oprand ast.Node, expr *as
 			}
 			if doDup && !isPost {
 			}
-			g.bytecodes.addIload(varIndex)
+			g.bytecodes.AddIload(varIndex)
 			return nil
 		default:
 			return NewCompileError("invalid type for " + expr.GetName())
@@ -488,11 +491,11 @@ func (g *CCodeGenerator) AtExpression(expr *ast.Expression) error {
 		}
 		if !booleanExpr {
 			g.bytecodes.WriteIndex(7)
-			g.bytecodes.addIconst(1)
+			g.bytecodes.AddIconst(1)
 			g.bytecodes.AddOpcode(classfile.OpGoto)
 			g.bytecodes.WriteIndex(4)
 		}
-		g.bytecodes.addIconst(0)
+		g.bytecodes.AddIconst(0)
 		return nil
 
 	case ast.Call:
@@ -526,11 +529,11 @@ func (g *CCodeGenerator) AtExpression(expr *ast.Expression) error {
 		case ast.BitNot:
 			switch typePrec {
 			case P_INT:
-				g.bytecodes.addIconst(-1)
+				g.bytecodes.AddIconst(-1)
 				g.bytecodes.AddOpcode(classfile.OpIXor)
 				g.exprType = ast.Int
 			case P_LONG:
-				g.bytecodes.addLconst(-1)
+				g.bytecodes.AddLconst(-1)
 				g.bytecodes.AddOpcode(classfile.OpLXor)
 			default:
 				return NewCompileError("invalid types for " + expr.GetName())
@@ -590,12 +593,12 @@ func (g *CCodeGenerator) AtBinExpr(expr *ast.BinExpr) error {
 		}
 		if !booleanExpr {
 			g.bytecodes.WriteIndex(7)
-			g.bytecodes.addIconst(0) // false
+			g.bytecodes.AddIconst(0) // false
 			g.bytecodes.AddOpcode(classfile.OpGoto)
 			g.bytecodes.WriteIndex(4)
 		}
 
-		g.bytecodes.addIconst(1) // true
+		g.bytecodes.AddIconst(1) // true
 	}
 
 	return nil
@@ -617,7 +620,7 @@ func (g *CCodeGenerator) AtCastExpr(expr *ast.CastExpr) error {
 	if toClass == "" {
 		return g.atNumCastExpr(srcType, g.exprType) // built-in type
 	} else {
-		g.bytecodes.addCheckCast(toClass)
+		g.bytecodes.AddCheckCast(toClass)
 	}
 	return nil
 }
@@ -718,17 +721,17 @@ func (g *CCodeGenerator) atVariableAssign(expr *ast.Expression, op ast.TokenID, 
 		}
 	}
 	if varArray > 0 {
-		g.bytecodes.addAStore(varNo)
+		g.bytecodes.AddAStore(varNo)
 	} else if varType == ast.Double {
-		g.bytecodes.addDstore(varNo)
+		g.bytecodes.AddDstore(varNo)
 	} else if varType == ast.Float {
-		g.bytecodes.addFstore(varNo)
+		g.bytecodes.AddFstore(varNo)
 	} else if varType == ast.Long {
-		g.bytecodes.addLstore(varNo)
+		g.bytecodes.AddLstore(varNo)
 	} else if isRefType(varType) {
-		g.bytecodes.addAStore(varNo)
+		g.bytecodes.AddAStore(varNo)
 	} else {
-		g.bytecodes.addIStore(varNo)
+		g.bytecodes.AddIStore(varNo)
 	}
 	g.exprType = varType
 	g.arrayDim = varArray
@@ -965,7 +968,7 @@ func (g *CCodeGenerator) atStringPlusEq(expr *ast.Expression, aType ast.TokenID,
 	if err != nil {
 		return err
 	}
-	g.bytecodes.addInvokeVirtual(javaLangString, "concat", "(Ljava/lang/String;)Ljava/lang/String;")
+	g.bytecodes.AddInvokeVirtual(javaLangString, "concat", "(Ljava/lang/String;)Ljava/lang/String;")
 	g.exprType = ast.Class
 	g.arrayDim = 0
 	g.className = jvmJavaLangString
@@ -975,21 +978,21 @@ func (g *CCodeGenerator) atStringPlusEq(expr *ast.Expression, aType ast.TokenID,
 func (g *CCodeGenerator) convToString(aType ast.TokenID, dim int) error {
 	method := "valueOf"
 	if isRefType(aType) || dim > 0 {
-		g.bytecodes.addInvokeStatic(javaLangString, method, "(Ljava/lang/Object;)Ljava/lang/String;")
+		g.bytecodes.AddInvokeStatic(javaLangString, method, "(Ljava/lang/Object;)Ljava/lang/String;")
 	} else if aType == ast.Double {
-		g.bytecodes.addInvokeStatic(javaLangString, method, "(D)Ljava/lang/String;")
+		g.bytecodes.AddInvokeStatic(javaLangString, method, "(D)Ljava/lang/String;")
 	} else if aType == ast.Float {
-		g.bytecodes.addInvokeStatic(javaLangString, method, "(F)Ljava/lang/String;")
+		g.bytecodes.AddInvokeStatic(javaLangString, method, "(F)Ljava/lang/String;")
 	} else if aType == ast.Long {
-		g.bytecodes.addInvokeStatic(javaLangString, method, "(J)Ljava/lang/String;")
+		g.bytecodes.AddInvokeStatic(javaLangString, method, "(J)Ljava/lang/String;")
 	} else if aType == ast.Boolean {
-		g.bytecodes.addInvokeStatic(javaLangString, method, "(Z)Ljava/lang/String;")
+		g.bytecodes.AddInvokeStatic(javaLangString, method, "(Z)Ljava/lang/String;")
 	} else if aType == ast.Char {
-		g.bytecodes.addInvokeStatic(javaLangString, method, "(C)Ljava/lang/String;")
+		g.bytecodes.AddInvokeStatic(javaLangString, method, "(C)Ljava/lang/String;")
 	} else if aType == ast.Void {
 		return NewCompileError("void type expression")
 	} else {
-		g.bytecodes.addInvokeStatic(javaLangString, method, "(I)Ljava/lang/String;")
+		g.bytecodes.AddInvokeStatic(javaLangString, method, "(I)Ljava/lang/String;")
 	}
 	return nil
 }
@@ -1336,9 +1339,9 @@ func (c *CCodeGenerator) atSwitchStmnt(st *ast.Statement) error {
 	if isString {
 		tmpVar = c.bytecodes.MaxLocals
 		c.bytecodes.incMaxLocals(1)
-		c.bytecodes.addAStore(tmpVar)
-		c.bytecodes.addAload(tmpVar)
-		c.bytecodes.addInvokeVirtual(jvmJavaLangString, "hashCode", "()I")
+		c.bytecodes.AddAStore(tmpVar)
+		c.bytecodes.AddAload(tmpVar)
+		c.bytecodes.AddInvokeVirtual(jvmJavaLangString, "hashCode", "()I")
 	}
 
 	prevBreakList := c.breakList
@@ -1362,7 +1365,7 @@ func (c *CCodeGenerator) atSwitchStmnt(st *ast.Statement) error {
 
 	opcodePc2 := c.bytecodes.currentPc()
 	c.bytecodes.AddGap(4)
-	c.bytecodes.add32bit(npairs)
+	c.bytecodes.Add32bit(npairs)
 	c.bytecodes.AddGap(npairs * 8)
 
 	pairs := make([]int64, npairs)
@@ -1446,7 +1449,7 @@ func (g *CCodeGenerator) atSyncStmnt(st *ast.Statement) error {
 	varIndex := bc.MaxLocals
 	bc.incMaxLocals(1)
 	bc.AddOpcode(classfile.OpDup)
-	bc.addAStore(varIndex)
+	bc.AddAStore(varIndex)
 	bc.AddOpcode(classfile.OpMonitorEnter)
 
 	//rh := &ReturnHook{g: g, DoitFunc: func(b *Bytecode, opcode int) bool {
@@ -1476,7 +1479,7 @@ func (g *CCodeGenerator) atSyncStmnt(st *ast.Statement) error {
 		pc4 := bc.currentPc()
 		//rh.Doit(bc, 0) // the 2nd arg is ignored
 		bc.AddOpcode(classfile.OpAThrow)
-		bc.addExceptionHandler(pc, pc2, pc4, "")
+		bc.AddExceptionHandler(pc, pc2, pc4, "")
 	}
 
 	if !g.hasReturn {
@@ -1600,9 +1603,9 @@ func (g *CCodeGenerator) computeStringLabel(expr ast.Node, tmpVar int, gotoDefau
 	switch e := expr.(type) {
 	case *ast.StringLiteral:
 		label := e.Text
-		g.bytecodes.addAload(tmpVar)
-		g.bytecodes.addLdc(g.bytecodes.AddStringRef(label))
-		g.bytecodes.addInvokeVirtual(jvmJavaLangString, "equals", "(Ljava/lang/Object;)Z")
+		g.bytecodes.AddAload(tmpVar)
+		g.bytecodes.AddLdc(g.bytecodes.AddStringRef(label))
+		g.bytecodes.AddInvokeVirtual(jvmJavaLangString, "equals", "(Ljava/lang/Object;)Z")
 		g.bytecodes.AddOpcode(classfile.OpIfEQ)
 		pc := g.bytecodes.currentPc()
 		g.bytecodes.WriteIndex(0)
@@ -1733,14 +1736,14 @@ func (g *CCodeGenerator) atClassObject(expr *ast.Expression) error {
 func (g *CCodeGenerator) atClassObject2(cname string) {
 	if reflect.GetVersion() < 48 {
 		start := g.bytecodes.currentPc()
-		g.bytecodes.addLdc(g.bytecodes.AddStringRef(cname))
-		g.bytecodes.addInvokeStatic("java/lang/Class", "forName", "(Ljava/lang/String;)Ljava/lang/Class;")
+		g.bytecodes.AddLdc(g.bytecodes.AddStringRef(cname))
+		g.bytecodes.AddInvokeStatic("java/lang/Class", "forName", "(Ljava/lang/String;)Ljava/lang/Class;")
 		end := g.bytecodes.currentPc()
 		g.bytecodes.AddOpcode(classfile.OpGoto)
 		pc := g.bytecodes.currentPc()
 		g.bytecodes.WriteIndex(0) // correct later
 
-		g.bytecodes.addExceptionHandler(start, end, g.bytecodes.currentPc(), "java/lang/ClassNotFoundException")
+		g.bytecodes.AddExceptionHandler(start, end, g.bytecodes.currentPc(), "java/lang/ClassNotFoundException")
 
 		// Handle exception with DotClass.fail()
 		/* -- the following code is for inlining a call to DotClass.fail().
@@ -1760,11 +1763,11 @@ func (g *CCodeGenerator) atClassObject2(cname string) {
 		*/
 
 		g.bytecodes.growStack(1)
-		g.bytecodes.addInvokeStatic("javassist/runtime/DotClass", "fail", "(Ljava/lang/ClassNotFoundException;)Ljava/lang/NoClassDefFoundError;")
+		g.bytecodes.AddInvokeStatic("javassist/runtime/DotClass", "fail", "(Ljava/lang/ClassNotFoundException;)Ljava/lang/NoClassDefFoundError;")
 		g.bytecodes.AddOpcode(classfile.OpAThrow)
 		g.bytecodes.Write16bit(pc, g.bytecodes.currentPc()-pc+1)
 	} else {
-		g.bytecodes.addLdc(g.bytecodes.pool.AddClassInfo(cname))
+		g.bytecodes.AddLdc(g.bytecodes.pool.AddClassInfo(cname))
 	}
 }
 
@@ -1820,7 +1823,7 @@ func (g *CCodeGenerator) atStringConcatExpr(expr *ast.BinExpr, type1 ast.TokenID
 		}
 	}
 
-	g.bytecodes.addInvokeVirtual("java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;")
+	g.bytecodes.AddInvokeVirtual("java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;")
 	g.exprType = ast.Class
 	g.arrayDim = 0
 	g.className = jvmJavaLangString

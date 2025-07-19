@@ -146,8 +146,9 @@ func readAttributeInfo(reader *ClassReader) AttributeInfo {
 		return readSignatureAttribute(reader)
 	case SourceFile:
 		return readSourceFileAttribute(reader)
-	// case SourceDebugExtension:
-	// case StackMapTable:
+		// case SourceDebugExtension:
+	case StackMapTable:
+		return readStackMapTableAttribute(reader)
 	case Synthetic:
 		return SyntheticAttribute{}
 	default:
@@ -159,6 +160,82 @@ func readAttributeInfo(reader *ClassReader) AttributeInfo {
 			Info:   reader.ReadBytes(int(attrLen)),
 		}
 	}
+}
+
+func readStackMapTableAttribute(reader *ClassReader) StackMapTableAttribute {
+	numEntries := reader.ReadUint16()
+	entries := make([]StackMapFrame, 0, numEntries)
+	for i := 0; i < int(numEntries); i++ {
+		frameType := reader.ReadUint8()
+		var frame StackMapFrame
+		switch {
+		case frameType <= 63:
+			frame = &SameFrame{FrameTypeVal: frameType}
+		case frameType >= 64 && frameType <= 127:
+			stack := make([]VerificationTypeInfo, 1)
+			stack[0] = readVerificationTypeInfo(reader)
+			frame = &SameLocals1StackItemFrame{FrameTypeVal: frameType, Stack: stack}
+		case frameType == 247:
+			offsetDelta := reader.ReadUint16()
+			stack := make([]VerificationTypeInfo, 1)
+			stack[0] = readVerificationTypeInfo(reader)
+			frame = &SameLocals1StackItemFrameExtended{OffsetDelta: offsetDelta, Stack: stack}
+		case frameType >= 248 && frameType <= 250:
+			offsetDelta := reader.ReadUint16()
+			frame = &ChopFrame{FrameTypeVal: frameType, OffsetDelta: offsetDelta}
+		case frameType == 251:
+			offsetDelta := reader.ReadUint16()
+			frame = &SameFrameExtended{OffsetDelta: offsetDelta}
+		case frameType >= 252 && frameType <= 254:
+			offsetDelta := reader.ReadUint16()
+			nLocals := int(frameType - 251)
+			locals := make([]VerificationTypeInfo, nLocals)
+			for j := 0; j < nLocals; j++ {
+				locals[j] = readVerificationTypeInfo(reader)
+			}
+			frame = &AppendFrame{FrameTypeVal: frameType, OffsetDelta: offsetDelta, Locals: locals}
+		case frameType == 255:
+			offsetDelta := reader.ReadUint16()
+			numLocals := reader.ReadUint16()
+			locals := make([]VerificationTypeInfo, numLocals)
+			for j := 0; j < int(numLocals); j++ {
+				locals[j] = readVerificationTypeInfo(reader)
+			}
+			numStack := reader.ReadUint16()
+			stack := make([]VerificationTypeInfo, numStack)
+			for j := 0; j < int(numStack); j++ {
+				stack[j] = readVerificationTypeInfo(reader)
+			}
+			frame = &FullFrame{
+				OffsetDelta: offsetDelta,
+				Locals:      locals,
+				Stack:       stack,
+			}
+		}
+		entries = append(entries, frame)
+	}
+	return StackMapTableAttribute{Entries: entries}
+}
+
+func readVerificationTypeInfo(reader *ClassReader) VerificationTypeInfo {
+	tag := reader.ReadUint8()
+	info := VerificationTypeInfo{Tag: tag}
+	switch tag {
+	case 7:
+		info.CPoolIndex = reader.ReadUint16()
+	case 8:
+		info.Offset = reader.ReadUint16()
+	}
+	return info
+}
+
+func writeStackMapTableAttribute(attribute StackMapTableAttribute) []byte {
+	var buf bytes.Buffer
+	buf.Write([]byte{byte(len(attribute.Entries) >> 8), byte(len(attribute.Entries))}) // number_of_entries
+	for _, entry := range attribute.Entries {
+		buf.Write(entry.ToBytes())
+	}
+	return buf.Bytes()
 }
 
 type AttributeTable []AttributeInfo
@@ -307,6 +384,56 @@ type CodeAttribute struct {
 	Code           []byte
 	ExceptionTable []ExceptionTableEntry
 	AttributeTable
+}
+
+// RemoveDebugAttribute 删除调试属性,仅保留运行时必要属性,用于缩短class长度
+func (c CodeAttribute) RemoveDebugAttribute(file *ClassFile) CodeAttribute {
+	attrs := make([]AttributeInfo, 0)
+	for _, a := range c.AttributeTable {
+		switch a.(type) {
+		case LocalVariableTableAttribute:
+			table := a.(LocalVariableTableAttribute)
+			cp := file.ConstantPool
+			for _, attr := range table.LocalVariableTable {
+				name := string(cp[attr.NameIndex].([]byte))
+				// 删除不是字段名的局面变量名称
+				if name != "this" && name != "super" && name != "" {
+					hasExist := false
+					names := file.GetFieldNames()
+					for _, fieldName := range names {
+						if name == fieldName {
+							hasExist = true
+							break
+						}
+					}
+					if !hasExist {
+						cp[attr.NameIndex] = make([]byte, 0)
+					}
+					continue
+				}
+			}
+			file.ConstantPool = cp
+			continue
+		case LocalVariableTypeTableAttribute:
+			table := a.(LocalVariableTypeTableAttribute)
+			cp := file.ConstantPool
+			for _, attr := range table.LocalVariableTypeTable {
+				sig := string(cp[attr.SignatureIndex].([]byte))
+				if sig != "" {
+					cp[attr.SignatureIndex] = make([]byte, 0)
+				}
+			}
+			file.ConstantPool = cp
+			continue
+		case LineNumberTableAttribute, SourceFileAttribute, SignatureAttribute:
+			continue
+		default:
+			attrs = append(attrs, a)
+		}
+
+	}
+	c.AttributeTable = attrs
+	return c
 }
 
 func (a *CodeAttribute) GetAttribute(s string) interface{} {
@@ -607,9 +734,12 @@ func writeAttributeInfo(writer *ClassWriter, attr AttributeInfo) []byte {
 	case SyntheticAttribute:
 		data = writeSyntheticAttribute(a)
 		nameIndex = writer.cf.GetConstStrIndex(Synthetic)
+	case StackMapTableAttribute:
+		data = writeStackMapTableAttribute(a)
+		nameIndex = writer.cf.GetConstStrIndex(StackMapTable)
 	case UnparsedAttribute:
 		data = writeUnparsedAttribute(writer, a)
-		nameIndex = writer.cf.GetConstStrIndex(Code)
+		nameIndex = writer.cf.GetConstStrIndex(a.Name)
 	default:
 		// 其他类型的属性
 		panic(fmt.Errorf("unknown attribute type: %T", a))
@@ -637,4 +767,160 @@ func writeAttributes(writer *ClassWriter, attributes []AttributeInfo) []byte {
 		buf.Write(writeAttributeInfo(writer, attr)) // 使用返回的字节切片
 	}
 	return buf.Bytes() // 返回字节切片
+}
+
+type StackMapTableAttribute struct {
+	Entries []StackMapFrame
+}
+
+type VerificationTypeInfo struct {
+	Tag        uint8
+	CPoolIndex uint16 // ITEM_Object 用
+	Offset     uint16 // ITEM_Uninitialized 用
+}
+
+func (v *VerificationTypeInfo) ToBytes() []byte {
+	data := []byte{v.Tag}
+	switch v.Tag {
+	case 7, 8:
+		data = append(data, uint16ToBytes(v.CPoolIndex)...)
+	}
+	return data
+}
+
+// StackMapFrame 接口
+type StackMapFrame interface {
+	// FrameType 返回 frame_type 值（u1）
+	FrameType() uint8
+	// ToBytes 返回 frame 编码后的 []byte
+	ToBytes() []byte
+}
+
+// same_frame: frame_type in [0..63]
+type SameFrame struct {
+	FrameTypeVal uint8 // 必须在0..63
+}
+
+func (sf *SameFrame) FrameType() uint8 {
+	return sf.FrameTypeVal
+}
+
+func (sf *SameFrame) ToBytes() []byte {
+	return []byte{sf.FrameTypeVal}
+}
+
+// same_locals_1_stack_item_frame: frame_type in [64..127]
+type SameLocals1StackItemFrame struct {
+	FrameTypeVal uint8 // 64..127
+	Stack        []VerificationTypeInfo
+}
+
+func (f *SameLocals1StackItemFrame) FrameType() uint8 {
+	return f.FrameTypeVal
+}
+
+func (f *SameLocals1StackItemFrame) ToBytes() []byte {
+	data := []byte{f.FrameTypeVal}
+	for _, item := range f.Stack {
+		data = append(data, item.ToBytes()...)
+	}
+	return data
+}
+
+// full_frame: frame_type=255
+type FullFrame struct {
+	OffsetDelta uint16
+	Locals      []VerificationTypeInfo
+	Stack       []VerificationTypeInfo
+}
+
+func (f *FullFrame) FrameType() uint8 {
+	return 255
+}
+
+func (f *FullFrame) ToBytes() []byte {
+	data := []byte{255}
+	data = append(data, uint16ToBytes(f.OffsetDelta)...)
+	data = append(data, uint16ToBytes(uint16(len(f.Locals)))...)
+	for _, local := range f.Locals {
+		data = append(data, local.ToBytes()...)
+	}
+	data = append(data, uint16ToBytes(uint16(len(f.Stack)))...)
+	for _, s := range f.Stack {
+		data = append(data, s.ToBytes()...)
+	}
+	return data
+}
+
+// same_locals_1_stack_item_frame_extended: frame_type = 247
+// 结构：u1 frame_type, u2 offset_delta, verification_type_info stack[1]
+type SameLocals1StackItemFrameExtended struct {
+	OffsetDelta uint16
+	Stack       []VerificationTypeInfo // 1 个元素
+}
+
+func (f *SameLocals1StackItemFrameExtended) FrameType() uint8 {
+	return 247
+}
+func (f *SameLocals1StackItemFrameExtended) ToBytes() []byte {
+	data := []byte{247}
+	data = append(data, uint16ToBytes(f.OffsetDelta)...)
+	for _, item := range f.Stack {
+		data = append(data, item.ToBytes()...)
+	}
+	return data
+}
+
+// chop_frame: frame_type in [248-250]
+type ChopFrame struct {
+	FrameTypeVal uint8 // 248-250
+	OffsetDelta  uint16
+}
+
+func (f *ChopFrame) FrameType() uint8 {
+	return f.FrameTypeVal
+}
+func (f *ChopFrame) ToBytes() []byte {
+	return append([]byte{f.FrameTypeVal}, uint16ToBytes(f.OffsetDelta)...)
+}
+
+// same_frame_extended: frame_type = 251
+type SameFrameExtended struct {
+	OffsetDelta uint16
+}
+
+func (f *SameFrameExtended) FrameType() uint8 {
+	return 251
+}
+func (f *SameFrameExtended) ToBytes() []byte {
+	return append([]byte{251}, uint16ToBytes(f.OffsetDelta)...)
+}
+
+// append_frame: frame_type in [252-254]
+type AppendFrame struct {
+	FrameTypeVal uint8 // 252-254
+	OffsetDelta  uint16
+	Locals       []VerificationTypeInfo
+}
+
+func (f *AppendFrame) FrameType() uint8 {
+	return f.FrameTypeVal
+}
+func (f *AppendFrame) ToBytes() []byte {
+	data := []byte{f.FrameTypeVal}
+	data = append(data, uint16ToBytes(f.OffsetDelta)...)
+	for _, local := range f.Locals {
+		data = append(data, local.ToBytes()...)
+	}
+	return data
+}
+
+func uint16ToBytes(n uint16) []byte {
+	return []byte{byte(n >> 8), byte(n)}
+}
+
+func uint32ToBytes(n uint32) []byte {
+	return []byte{
+		byte(n >> 24), byte(n >> 16), byte(n >> 8), byte(n),
+	}
 }

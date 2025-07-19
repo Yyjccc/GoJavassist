@@ -2,6 +2,7 @@ package classfile
 
 import (
 	"bytes"
+	"encoding/binary"
 	"sort"
 	"strconv"
 )
@@ -36,6 +37,16 @@ func (table *LocalVariableTableAttribute) Sort() {
 	sort.Slice(table.LocalVariableTable, func(i, j int) bool {
 		return table.LocalVariableTable[i].Index < table.LocalVariableTable[j].Index
 	})
+}
+
+func readU16bit(data []byte, offset int) uint16 {
+	return binary.BigEndian.Uint16(data[offset : offset+2])
+}
+
+// StartPc 计算变量起始位置
+func (table *LocalVariableTableAttribute) StartPc(index int) uint16 {
+	entry := table.LocalVariableTable[index]
+	return entry.StartPc
 }
 
 //局部变量

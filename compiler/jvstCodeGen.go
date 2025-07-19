@@ -166,20 +166,40 @@ func (j *JvtCodeGenerator) recordReturnType(rType *reflect.CtClass, castName str
 	return varNo
 }
 
+func (j *JvtCodeGenerator) recordVariable(desc, varName string, varNo int, tbl *SymbolTable) {
+	var c = desc[0]
+	dim := 0
+	for c == '[' {
+		c = desc[dim]
+		dim++
+	}
+	cname := ""
+	aType := descToType(rune(c))
+	if aType == ast.Class {
+		if dim == 0 {
+			cname = desc[1 : len(desc)-1]
+		} else {
+			cname = desc[dim+1 : len(desc)-1]
+		}
+	}
+	decl := ast.NewDeclaratorFull(aType, cname, dim, varNo, ast.NewSymbol(varName))
+	tbl.Append(varName, decl)
+}
+
 func compileParameterList(code *ByteCodes, params []*reflect.CtClass, regno int) int {
 	if len(params) == 0 {
-		code.addIconst(0)
+		code.AddIconst(0)
 		code.addAnewArray(javaLangObject)
 		return 1
 	}
 	args := make([]*reflect.CtClass, 1)
 	n := len(params)
-	code.addIconst(n)
+	code.AddIconst(n)
 	code.addAnewArray(javaLangObject)
 
 	for i := 0; i < n; i++ {
 		code.AddOpcode(classfile.OpDup)
-		code.addIconst(i)
+		code.AddIconst(i)
 		if params[i].IsPrimitive() {
 			//基本数据类型
 			clazz := params[i]
@@ -191,7 +211,7 @@ func compileParameterList(code *ByteCodes, params []*reflect.CtClass, regno int)
 			args[0] = clazz
 			code.AddInvokeSpecial(wrapper, "<init>", OfMethodDescriptor(reflect.VoidType, args))
 		} else {
-			code.addAload(regno)
+			code.AddAload(regno)
 			regno++
 		}
 		code.AddOpcode(classfile.OpAAStore) // aastore

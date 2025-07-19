@@ -115,7 +115,8 @@ func (m *MemberCodeGenerator) atFieldAssign(expr *ast.AssignExpr, op ast.TokenID
 	fi := 0
 	if op == ast.Assign {
 		m.setFieldType(f)
-
+		cp := m.bytecodes.pool
+		fi = cp.AddFieldRefInfo(cp.AddClassInfo0(f.Declaring), f.Name, f.Descriptor)
 	} else {
 		fi, err = m.atFieldRead1(f, is_static)
 		if err != nil {
@@ -214,7 +215,7 @@ func (m *MemberCodeGenerator) AtCallExpr(expr *ast.CallExpr) error {
 			isStatic = true // should be static
 		} else {
 			aload0pos = m.bytecodes.currentPc()
-			m.bytecodes.addAload(0) // load this
+			m.bytecodes.AddAload(0) // load this
 		}
 	}
 	if k, ok := method.(*ast.Keyword); ok { // constructor
@@ -225,7 +226,7 @@ func (m *MemberCodeGenerator) AtCallExpr(expr *ast.CallExpr) error {
 		if m.CCodeGenerator.isStaticMethod {
 			return NewCompileError("a constructor cannot be static")
 		}
-		m.bytecodes.addAload(0) // load this
+		m.bytecodes.AddAload(0) // load this
 		if k.Name == "super" {
 			targetClass, err = m.resolver.lookupClassByJvmName(targetClass.SuperClassName)
 			if err != nil {
@@ -265,7 +266,7 @@ func (m *MemberCodeGenerator) AtCallExpr(expr *ast.CallExpr) error {
 					isStatic = true // should be static
 				} else {
 					aload0pos = m.bytecodes.currentPc()
-					m.bytecodes.addAload(0) // this
+					m.bytecodes.AddAload(0) // this
 				}
 			} else {
 				if k, ok := target.(*ast.Keyword); ok {
@@ -354,9 +355,9 @@ func (m *MemberCodeGenerator) atTryStmnt(s *ast.Statement) error {
 		}
 		cname := varType.QualifiedName
 		d.SetClassName(JavaToJvmName(cname))
-		bc.addExceptionHandler(start, end, bc.currentPc(), cname)
+		bc.AddExceptionHandler(start, end, bc.currentPc(), cname)
 		bc.growStack(1)
-		bc.addAStore(varIndex)
+		bc.AddAStore(varIndex)
 		m.hasReturn = false
 		if block != nil {
 			err := block.Accept(m)
@@ -377,14 +378,14 @@ func (m *MemberCodeGenerator) atTryStmnt(s *ast.Statement) error {
 		pcAnyCatch := bc.currentPc()
 		bc.tryblocks.Add(start, pcAnyCatch, pcAnyCatch, 0)
 		bc.growStack(1)
-		bc.addAStore(varIndex)
+		bc.AddAStore(varIndex)
 		m.hasReturn = false
 		err := finallyBlock.Accept(m)
 		if err != nil {
 			return err
 		}
 		if !m.hasReturn {
-			bc.addAload(varIndex)
+			bc.AddAload(varIndex)
 			bc.AddOpcode(classfile.OpAThrow)
 		}
 
@@ -431,7 +432,7 @@ func (m *MemberCodeGenerator) atMethodCallCore2(targetClass *reflect.CtClass, mn
 	acc := found.Acc
 	if mname == initMethodName {
 		isSpecial = true
-		if declClass != targetClass {
+		if !declClass.Equal(targetClass) {
 			return NewCompileError("no such constructor: " + targetClass.QualifiedName)
 		}
 		if declClass != m.thisClass && acc.Private {
@@ -472,7 +473,7 @@ func (m *MemberCodeGenerator) atMethodCallCore2(targetClass *reflect.CtClass, mn
 				popTarget = true
 			}
 		}
-		m.bytecodes.addInvokeStatic2(targetClass, mname, des)
+		m.bytecodes.AddInvokeStatic2(targetClass, mname, des)
 	} else if isSpecial {
 		m.bytecodes.AddInvokeSpecial(targetClass.QualifiedName, mname, des)
 	} else {
@@ -485,7 +486,7 @@ func (m *MemberCodeGenerator) atMethodCallCore2(targetClass *reflect.CtClass, mn
 				if isStatic {
 					return NewCompileError(mname + " is not static")
 				} else {
-					m.bytecodes.addInvokeVirtual2(declClass, mname, des)
+					m.bytecodes.AddInvokeVirtual2(declClass, mname, des)
 				}
 
 			}
@@ -617,7 +618,7 @@ func (m *MemberCodeGenerator) atNewArrayExpr2(varType ast.TokenID, sizeExpr ast.
 	} else {
 		if sizeExpr == nil {
 			s := init.Size()
-			m.bytecodes.addIconst(s)
+			m.bytecodes.AddIconst(s)
 		} else {
 			return NewCompileError("unnecessary array size specified for new")
 		}
@@ -664,7 +665,7 @@ func (m *MemberCodeGenerator) atNewArrayExpr2(varType ast.TokenID, sizeExpr ast.
 		list := init.ASTList
 		for i := 0; i < s; i++ {
 			m.bytecodes.AddOpcode(classfile.OpDup)
-			m.bytecodes.addIconst(i)
+			m.bytecodes.AddIconst(i)
 			if err = list.Head().Accept(m); err != nil {
 				return err
 			}
@@ -751,7 +752,7 @@ func (m *MemberCodeGenerator) fieldAccess(expr ast.Node, acceptLength bool) (*re
 		if m.inStaticMethod {
 			return nil, NewCompileError("not available in a static method: " + name)
 		} else {
-			m.bytecodes.addAload(0) // load this
+			m.bytecodes.AddAload(0) // load this
 		}
 		m.resultStatic = is_static
 		return f, nil
@@ -824,7 +825,7 @@ func (m *MemberCodeGenerator) atFieldRead1(f *reflect.CtField, isStatic bool) (i
 	//		minfo.getDescriptor());
 	//	return 0;
 	// }
-	fi := m.addFieldrefInfo(f)
+	fi := m.addFieldRefInfo(f)
 	if isStatic {
 		val := 1
 		if is2byte {
@@ -873,11 +874,11 @@ func (m *MemberCodeGenerator) IsAccessibleField(f *reflect.CtField) error {
 	return nil
 }
 
-func (m *MemberCodeGenerator) addFieldrefInfo(f *reflect.CtField) int {
+func (m *MemberCodeGenerator) addFieldRefInfo(f *reflect.CtField) int {
 	cp := m.bytecodes.pool
 	cname := f.Declaring.QualifiedName
 	ci := cp.AddClassInfo(cname)
-	return cp.AddFieldrefInfo(ci, f.Name, f.Descriptor)
+	return cp.AddFieldRefInfo(ci, f.Name, f.Descriptor)
 }
 
 func (m *MemberCodeGenerator) addFinally(returnList [][]int, finallyBlock *ast.Statement) error {
@@ -921,14 +922,18 @@ func (m *MemberCodeGenerator) atFieldAssignCore(f *reflect.CtField, is_static bo
 		if err != nil {
 			return err
 		}
-		m.bytecodes.addInvokeStatic(declClass.QualifiedName, setter.Name, setter.Descriptor)
+		m.bytecodes.AddInvokeStatic(declClass.QualifiedName, setter.Name, setter.Descriptor)
 	}
 	return nil
 }
 
 func (m *MemberCodeGenerator) insertDefaultSuperCall() {
-	m.bytecodes.addAload(0)
+	m.bytecodes.AddAload(0)
 	m.bytecodes.AddInvokeSpecial(m.thisClass.SuperClassName, "<init>", "()V")
+}
+
+func (m *MemberCodeGenerator) GetSuperName() string {
+	return JavaToJvmName(m.thisClass.SuperClassName)
 }
 
 func badLvalue() error {

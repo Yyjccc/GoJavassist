@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/Yyjccc/GoJavassist/classfile"
 	"github.com/Yyjccc/GoJavassist/compiler/reflect"
+	"os"
 
 	"io/ioutil"
 	"testing"
@@ -538,4 +539,25 @@ func TestCompileMethod(t *testing.T) {
 	//c := bytecode.NewClass(cf)
 	//fmt.Println(c)
 	ioutil.WriteFile("test.class", data, 0644)
+}
+
+func TestChangeClass(t *testing.T) {
+	file, err := os.ReadFile("test.class")
+	if err != nil {
+		return
+	}
+	cf, err := classfile.Parse(file)
+	if err != nil {
+		return
+	}
+	class := reflect.NewClass(cf)
+	reflect.DefaultPool.Register(class)
+	err = class.ChangeThisClassName("java.test.Yyjccc")
+	if err != nil {
+		return
+	}
+	get := reflect.DefaultPool.Get("java.test.Yyjccc")
+	fmt.Println(get)
+	code := class.ToClassFile().ToByteCode()
+	ioutil.WriteFile("yyjccc.class", code, 0644)
 }

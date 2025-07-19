@@ -223,6 +223,17 @@ func (cf *ClassFile) GetConstantInfo(cpIndex uint16) ConstantInfo {
 	}
 }
 
+func (cf *ClassFile) GetConstantClassInfoIndex(nameIndex uint16) uint16 {
+	for i, entry := range cf.ConstantPool {
+		if data, ok := entry.(ConstantClassInfo); ok {
+			if data.NameIndex == nameIndex {
+				return uint16(i)
+			}
+		}
+	}
+	return uint16(0)
+}
+
 // 获取常量池中现有字符串索引
 func (cf *ClassFile) GetConstStrIndex(name string) uint16 {
 	for i, entry := range cf.ConstantPool {
@@ -234,4 +245,25 @@ func (cf *ClassFile) GetConstStrIndex(name string) uint16 {
 		}
 	}
 	return 0
+}
+
+func (cf *ClassFile) GetFieldNames() []string {
+	var res []string
+	for _, field := range cf.Fields {
+		s := string(cf.ConstantPool[field.NameIndex].([]byte))
+		res = append(res, s)
+	}
+	return res
+}
+
+func NewClassFile() *ClassFile {
+	return &ClassFile{
+		MajorVersion:   52,
+		Interfaces:     make([]uint16, 0),
+		Fields:         make([]MemberInfo, 0),
+		Methods:        make([]MemberInfo, 0),
+		ConstantPool:   make([]ConstantInfo, 0),
+		AttributeTable: make([]AttributeInfo, 0),
+	}
+
 }

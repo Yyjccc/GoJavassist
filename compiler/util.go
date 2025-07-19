@@ -248,8 +248,11 @@ func descToType(c rune) ast.TokenID {
 		return ast.Char
 	case 'S':
 		return ast.Short
+	case 'L', '[':
+		return ast.Class
+
 	default:
-		return ast.BadToken
+		return ast.Void
 	}
 }
 
