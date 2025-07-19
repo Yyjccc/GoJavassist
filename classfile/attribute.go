@@ -442,6 +442,26 @@ func (a *CodeAttribute) GetAttribute(s string) interface{} {
 			if localVTable, ok := attrInfo.(LocalVariableTableAttribute); ok {
 				return &localVTable
 			}
+		case Code:
+			if codeVTable, ok := attrInfo.(CodeAttribute); ok {
+				return &codeVTable
+			}
+		case LocalVariableTypeTable:
+			if localVTable, ok := attrInfo.(LocalVariableTypeTableAttribute); ok {
+				return &localVTable
+			}
+		case LineNumberTable:
+			if lineNumberVTable, ok := attrInfo.(LineNumberTableAttribute); ok {
+				return &lineNumberVTable
+			}
+		case InnerClasses:
+			if classesVTable, ok := attrInfo.(InnerClassesAttribute); ok {
+				return &classesVTable
+			}
+		case StackMapTable:
+			if stackMapVTable, ok := attrInfo.(StackMapTableAttribute); ok {
+				return &stackMapVTable
+			}
 		}
 
 	}
@@ -452,7 +472,7 @@ func (a *CodeAttribute) GetCodeLength() uint16 {
 	return uint16(len(a.Code))
 }
 
-func (a *CodeAttribute) InsertLocalVar(where bool, size int) {
+func (a *CodeAttribute) InsertLocalVar(where int, size int) {
 	//TODO
 	a.MaxLocals = a.MaxLocals + uint16(size)
 }
@@ -921,5 +941,65 @@ func uint16ToBytes(n uint16) []byte {
 func uint32ToBytes(n uint32) []byte {
 	return []byte{
 		byte(n >> 24), byte(n >> 16), byte(n >> 8), byte(n),
+	}
+}
+
+func (smt *StackMapTableAttribute) InsertLocal(where, typeTag, classInfo int) {
+	// 遍历所有帧，插入本地变量类型
+	for _, frame := range smt.Entries {
+		switch f := frame.(type) {
+		case *FullFrame:
+			// 插入 VerificationTypeInfo
+			if where <= len(f.Locals) {
+				vt := VerificationTypeInfo{Tag: uint8(typeTag)}
+				if typeTag == 7 { // 对象类型
+					vt.CPoolIndex = uint16(classInfo)
+				}
+				// 插入到指定位置
+				locals := append(f.Locals, VerificationTypeInfo{})
+				copy(locals[where+1:], locals[where:])
+				locals[where] = vt
+				f.Locals = locals
+			}
+		case *AppendFrame:
+			// 只在追加帧时插入
+			if where <= len(f.Locals) {
+				vt := VerificationTypeInfo{Tag: uint8(typeTag)}
+				if typeTag == 7 {
+					vt.CPoolIndex = uint16(classInfo)
+				}
+				locals := append(f.Locals, VerificationTypeInfo{})
+				copy(locals[where+1:], locals[where:])
+				locals[where] = vt
+				f.Locals = locals
+			}
+		}
+	}
+}
+
+func TypeTagOf(typeDesc rune) int {
+	switch typeDesc {
+	case 'B': // byte
+		return 1 // ITEM_Integer
+	case 'C': // char
+		return 1 // ITEM_Integer
+	case 'D': // double
+		return 3 // ITEM_Double
+	case 'F': // float
+		return 2 // ITEM_Float
+	case 'I': // int
+		return 1 // ITEM_Integer
+	case 'J': // long
+		return 4 // ITEM_Long
+	case 'L': // object
+		return 7 // ITEM_Object
+	case 'S': // short
+		return 1 // ITEM_Integer
+	case 'Z': // boolean
+		return 1 // ITEM_Integer
+	case '[': // array
+		return 7 // ITEM_Object
+	default:
+		return 0 // ITEM_Top
 	}
 }

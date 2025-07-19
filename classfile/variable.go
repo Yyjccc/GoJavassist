@@ -68,6 +68,14 @@ type LocalVariableTableAttribute struct {
 	LocalVariableTable []LocalVariableTableEntry
 }
 
+func (va *LocalVariableTableAttribute) ShiftIndex(where, size int) {
+	for i := range va.LocalVariableTable {
+		if int(va.LocalVariableTable[i].Index) >= where {
+			va.LocalVariableTable[i].Index += uint16(size)
+		}
+	}
+}
+
 type LocalVariableTableEntry struct {
 	StartPc         uint16
 	Length          uint16
@@ -125,6 +133,14 @@ func writeLocalVariableTableAttribute(writer *ClassWriter, data LocalVariableTab
 */
 type LocalVariableTypeTableAttribute struct {
 	LocalVariableTypeTable []LocalVariableTypeTableEntry
+}
+
+func (lvta *LocalVariableTypeTableAttribute) ShiftIndex(where, size int) {
+	for i := range lvta.LocalVariableTypeTable {
+		if int(lvta.LocalVariableTypeTable[i].Index) >= where {
+			lvta.LocalVariableTypeTable[i].Index += uint16(size)
+		}
+	}
 }
 
 type LocalVariableTypeTableEntry struct {

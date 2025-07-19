@@ -287,30 +287,56 @@ func (v *MethodVisitor) InsertParameter(pType *reflect.CtClass) error {
 	v.thisClass.CheckModify()
 	desc := v.thisMethod.Descriptor
 	desc2 := reflect.DescriptorInsertParameter(pType, desc)
-	if err := v.addParameter2(v.thisMethod.Acc.Static, pType, desc); err != nil {
+	where := 0
+	if !v.thisMethod.Acc.Static {
+		where = 1
+	}
+	if err := v.addParameter2(where, pType, desc); err != nil {
 		return err
 	}
 	v.thisMethod.Descriptor = desc2
 	return nil
 }
 
-func (v *MethodVisitor) addParameter2(where bool, pType *reflect.CtClass, desc string) error {
+func (v *MethodVisitor) addParameter2(where int, pType *reflect.CtClass, desc string) error {
 	ca := v.thisMethod.GetCodeAttribute()
 	if ca == nil {
 		return nil
 	}
 	size := 1
-	//TODO
-	//typeDesc := 'L'
-	//classInfo := 0
+	typeDesc := 'L'
+	classInfo := 0
 	if pType.IsPrimitive() {
 		cpt := pType.PrimitiveType
 		size = cpt.GetDataSize()
-		//typeDesc = cpt.GetDescriptor()
+		typeDesc = cpt.GetDescriptor()
 	} else {
-		//classInfo = v.thisClass.GetConstPool().AddClassInfo0(pType)
+		// 这里假设 AddClassInfo0 返回 int
+		classInfo = v.thisClass.GetConstPool().AddClassInfo0(pType)
 	}
 	ca.InsertLocalVar(where, size)
+
+	// LocalVariableTable
+	vaP := ca.GetAttribute(classfile.LocalVariableTable)
+	if vaP != nil {
+		va := vaP.(*classfile.LocalVariableTableAttribute)
+		va.ShiftIndex(where, size)
+	}
+
+	// LocalVariableTypeTable
+	lvtaP := ca.GetAttribute(classfile.LocalVariableTypeTable)
+	if lvtaP != nil {
+		lvta := lvtaP.(*classfile.LocalVariableTypeTableAttribute)
+		lvta.ShiftIndex(where, size)
+	}
+
+	// StackMapTable
+	smtP := ca.GetAttribute(classfile.StackMapTable)
+	if smtP != nil {
+		smt := smtP.(*classfile.StackMapTableAttribute)
+		smt.InsertLocal(where, classfile.TypeTagOf(typeDesc), classInfo)
+	}
+
 	return nil
 }
 
