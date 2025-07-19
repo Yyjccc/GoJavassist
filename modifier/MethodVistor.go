@@ -14,11 +14,11 @@ type MethodVisitor struct {
 }
 
 func NewMethodVisitor(method *reflect.CtMethod) *MethodVisitor {
-	code := method.GetCodeAttribute().Code
+	codeAttr := method.GetCodeAttribute()
 	return &MethodVisitor{
 		thisMethod: method,
 		thisClass:  method.Class,
-		Iterator:   NewCodeIterator(method.Class.ClassFile.ConstantPool, code),
+		Iterator:   NewCodeIterator(method, codeAttr),
 	}
 }
 
@@ -44,7 +44,7 @@ func (v *MethodVisitor) InsertBefore(body string) error {
 	}
 
 	pool := cc.GetConstPool()
-	iterator := NewCodeIterator(pool.GetPool(), ca.Code)
+	iterator := NewCodeIterator(v.thisMethod, ca)
 
 	// 1. 编译 body 代码为字节码
 	b := compiler.NewByteCodes(pool, 0, int(ca.MaxLocals))
@@ -77,65 +77,177 @@ func (v *MethodVisitor) InsertBefore(body string) error {
 	if b.MaxLocals > int(ca.MaxLocals) {
 		ca.MaxLocals = uint16(b.MaxLocals)
 	}
+	v.ReLoadCodeAttr(*ca)
 	return nil
 }
 
+// 替换指令为goto/goto_w，自动判断偏移
+func replaceWithGoto(iterator *CodeIterator, fromInstIdx, toInstIdx int) {
+	from := iterator.InstructionIndexToCodeOffset(fromInstIdx)
+	to := iterator.InstructionIndexToCodeOffset(toInstIdx)
+	// 如果advice代码就在return后面，直接顺序执行，无需插入goto
+	if to == from+1 {
+		// 可选：将原return指令替换为NOP，或直接跳过
+		nopInst := classfile.NewInstruction(classfile.OpNop)
+		iterator.Instruction[fromInstIdx] = nopInst
+		copy(iterator.Codes[from:], nopInst.Bytes())
+		return
+	}
+	offset := to - (from + 3)
+	if offset < -32768 || offset > 32767 {
+		gotoW := classfile.NewInstruction(classfile.OpGotoW).AddIndex(to - (from + 5))
+		iterator.Instruction[fromInstIdx] = gotoW
+		copy(iterator.Codes[from:], gotoW.Bytes())
+	} else {
+		gotoInst := classfile.NewInstruction(classfile.OpGoto).AddIndex(offset)
+		iterator.Instruction[fromInstIdx] = gotoInst
+		copy(iterator.Codes[from:], gotoInst.Bytes())
+	}
+}
+
 func (v *MethodVisitor) InsertAfter(body string) error {
-	cc := v.thisMethod.Class
-	m := v.thisMethod
-	cc.CheckModify()
-	pool := cc.GetConstPool()
 	ca := v.thisMethod.GetCodeAttribute()
 	if ca == nil {
 		return compiler.NewCompileError("no method body")
 	}
-	iterator := NewCodeIterator(pool.GetPool(), ca.Code)
-	retAddr := ca.MaxLocals
-	b := compiler.NewByteCodes(pool, 0, int(retAddr+1))
-	b.StackDepth = int(ca.MaxStack + 1)
-	jv := compiler.NewJavacWithByteCodes(b, cc)
-	jv.RecordParams(m.GetParameterTypes(), m.Acc.Static)
-	retType := m.GetReturnType()
-	varNo := jv.RecordReturnType(retType, true)
+	pool := v.thisClass.GetConstPool()
+	iterator := NewCodeIterator(v.thisMethod, ca)
+
+	b := compiler.NewByteCodes(pool, 0, int(ca.MaxLocals)+1)
+	jv := compiler.NewJavacWithByteCodes(b, v.thisClass)
+	jv.RecordParams(v.thisMethod.GetParameterTypes(), v.thisMethod.Acc.Static)
 	jv.RecordLocalVariables(ca, 0)
-	handlerLen, err := v.InsertAfterHandler(false, b, retType, varNo, jv, body)
+	retType := v.thisMethod.GetReturnType()
+	_ = jv.RecordReturnType(retType, true) // 保证副作用但不产生未使用警告
+	err := jv.CompileStmnt(body)
 	if err != nil {
 		return err
 	}
-	handlerPos := len(iterator.Codes)
-	adviceLen := 0
-	advicePos := 0
-	noReturn := true
-	for iterator.HasNext() {
-		inst, pos := iterator.Next()
-		c := inst.Opcode
-		if c == classfile.OpAReturn || c == classfile.OpIReturn || c == classfile.OpFReturn || c == classfile.OpLReturn || c == classfile.OpDReturn || c == classfile.OpReturn {
 
-		} else {
-			if noReturn {
-				adviceLen, err = v.InsertAfterAdvice(b, jv, body, pool, retType, varNo)
-				if err != nil {
-					return err
-				}
-				handlerPos = iterator.Append(b.Get())
-				iterator.AppendExceptionTable(*b.GetExceptionTable(), handlerPos)
-				advicePos = len(iterator.Codes) - adviceLen
-				handlerLen = advicePos - handlerPos
-				noReturn = false
-			}
-			v.InsertGoto(iterator, advicePos, pos)
-			advicePos = len(iterator.Codes) - adviceLen
-			handlerPos = advicePos - handlerLen
+	// 记录第一个return指令类型
+	var firstReturnOpcode classfile.OpCode = 0
+	for _, inst := range iterator.Instruction {
+		if classfile.IsReturnOpcode(inst.Opcode) {
+			firstReturnOpcode = inst.Opcode
+			break
 		}
 	}
-	if noReturn {
-		handlerPos = iterator.Append(b.Get())
-		iterator.AppendExceptionTable(*b.GetExceptionTable(), handlerPos)
+
+	adviceCodes := b.Get()
+	// adviceCodes 结尾补上原return类型的return指令
+	if firstReturnOpcode != 0 {
+		adviceCodes = append(adviceCodes, byte(firstReturnOpcode))
 	}
-	ca.MaxStack = uint16(b.MaxStack)
-	ca.MaxLocals = uint16(b.MaxLocals)
+
+	returnPositions := []int{}
+	jumpInstructions := []struct{ pos, target int }{}
+	switchJumps := []struct {
+		pos     int
+		targets []int
+	}{}
+	for i, inst := range iterator.Instruction {
+		if classfile.IsReturnOpcode(inst.Opcode) {
+			returnPositions = append(returnPositions, i)
+		}
+		if classfile.IsJumpInstruction(inst.Opcode) {
+			target := classfile.CalcJumpTarget(i, inst)
+			if target >= 0 {
+				jumpInstructions = append(jumpInstructions, struct{ pos, target int }{i, target})
+			}
+		}
+		if inst.Opcode == classfile.OpTableSwitch || inst.Opcode == classfile.OpLookupSwitch {
+			targets, _ := classfile.ParseSwitchTargets(iterator.Codes, i)
+			switchJumps = append(switchJumps, struct {
+				pos     int
+				targets []int
+			}{i, targets})
+		}
+	}
+	advicePos := len(iterator.Instruction)
+	iterator.Append(adviceCodes)
+	for _, retPos := range returnPositions {
+		replaceWithGoto(iterator, retPos, advicePos)
+	}
+
+	for _, jump := range jumpInstructions {
+		for _, retPos := range returnPositions {
+			if jump.target == retPos {
+				replaceWithGoto(iterator, jump.pos, advicePos)
+			}
+		}
+	}
+
+	for _, sw := range switchJumps {
+		for idx, t := range sw.targets {
+			for _, retPos := range returnPositions {
+				if t == retPos {
+					// 重新写入switch表项为advicePos
+					opcode := iterator.Codes[sw.pos]
+					pad := (4 - ((sw.pos + 1) % 4)) % 4
+					idx2 := sw.pos + 1 + pad
+					if opcode == byte(classfile.OpTableSwitch) {
+						idx2 += 4 // default
+						low := int(int32(iterator.Codes[idx2])<<24 | int32(iterator.Codes[idx2+1])<<16 | int32(iterator.Codes[idx2+2])<<8 | int32(iterator.Codes[idx2+3]))
+						high := int(int32(iterator.Codes[idx2+4])<<24 | int32(iterator.Codes[idx2+5])<<16 | int32(iterator.Codes[idx2+6])<<8 | int32(iterator.Codes[idx2+7]))
+						_ = high - low + 1 // 保证副作用但不产生未使用警告
+						idx2 += 8
+						if idx == 0 {
+							adviceOffset := advicePos - sw.pos
+							iterator.Write32bit(adviceOffset, sw.pos+1+pad)
+						} else {
+							adviceOffset := advicePos - sw.pos
+							iterator.Write32bit(adviceOffset, idx2+4*(idx-1))
+						}
+					} else {
+						idx2 += 4 // default
+						if idx == 0 {
+							adviceOffset := advicePos - sw.pos
+							iterator.Write32bit(adviceOffset, sw.pos+1+pad)
+						} else {
+							adviceOffset := advicePos - sw.pos
+							iterator.Write32bit(adviceOffset, idx2+8*(idx-1)+4)
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// 修正异常表
+	for i := range ca.ExceptionTable {
+		if int(ca.ExceptionTable[i].StartPc) >= advicePos {
+			ca.ExceptionTable[i].StartPc += uint16(len(adviceCodes))
+		}
+		if int(ca.ExceptionTable[i].EndPc) >= advicePos {
+			ca.ExceptionTable[i].EndPc += uint16(len(adviceCodes))
+		}
+		if int(ca.ExceptionTable[i].HandlerPc) >= advicePos {
+			ca.ExceptionTable[i].HandlerPc += uint16(len(adviceCodes))
+		}
+	}
+
 	ca.Code = iterator.Codes
+	if b.MaxStack > int(ca.MaxStack) {
+		ca.MaxStack = uint16(b.MaxStack)
+	}
+	if b.MaxLocals > int(ca.MaxLocals) {
+		ca.MaxLocals = uint16(b.MaxLocals)
+	}
+	v.ReLoadCodeAttr(*ca)
 	return nil
+}
+
+func (v *MethodVisitor) ReLoadCodeAttr(ca classfile.CodeAttribute) {
+	newTable := make([]classfile.AttributeInfo, 0)
+	table := v.thisMethod.Member.AttributeTable
+	for _, attr := range table {
+		if _, ok := attr.(classfile.CodeAttribute); ok {
+			newTable = append(newTable, ca)
+			continue
+		}
+		newTable = append(newTable, attr)
+	}
+	v.thisMethod.Member.AttributeTable = newTable
 }
 
 // AddLocalVariable 添加局部变量

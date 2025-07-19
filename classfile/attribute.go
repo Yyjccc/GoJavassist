@@ -349,7 +349,6 @@ func (at AttributeTable) getUnparsedAttributeData(name string) []byte {
 }
 
 func (at AttributeTable) Remove(tag string) {
-	//TODO
 
 	for i, attrInfo := range at {
 		if _, ok := attrInfo.(*ExceptionsAttribute); ok {

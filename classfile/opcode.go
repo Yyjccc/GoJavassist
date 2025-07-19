@@ -219,6 +219,87 @@ func ReadOpCode(opcode byte) OpCode {
 	return OpCode(opcode)
 }
 
+// 判断是否为return指令
+func IsReturnOpcode(op OpCode) bool {
+	return op == OpReturn || op == OpAReturn || op == OpIReturn ||
+		op == OpFReturn || op == OpLReturn || op == OpDReturn
+}
+
+// 计算跳转指令的目标位置
+func CalcJumpTarget(pos int, inst Instruction) int {
+	switch inst.Opcode {
+	case OpGoto, OpJSR,
+		OpIfEQ, OpIfNE, OpIfLT, OpIfGE, OpIfGT, OpIfLE,
+		OpIfICmpEQ, OpIfICmpNE, OpIfICmpLT, OpIfICmpGE, OpIfICmpGT, OpIfICmpLE,
+		OpIfACmpEQ, OpIfACmpNE,
+		OpIfNull, OpIfNonNull:
+		if len(inst.Operands) >= 2 {
+			offset := int(int16(inst.Operands[0])<<8 | int16(inst.Operands[1]))
+			return pos + offset
+		}
+	case OpGotoW, OpJSRw:
+		if len(inst.Operands) >= 4 {
+			offset := int(int32(inst.Operands[0])<<24 | int32(inst.Operands[1])<<16 | int32(inst.Operands[2])<<8 | int32(inst.Operands[3]))
+			return pos + offset
+		}
+	case OpTableSwitch, OpLookupSwitch:
+		// 需要特殊处理，暂略（可后续补充）
+		return -1
+	}
+	return -1
+}
+
+// 计算tableswitch/lookupswitch所有跳转目标
+func ParseSwitchTargets(codes []byte, pos int) (targets []int, err error) {
+	opcode := codes[pos]
+	if opcode != byte(OpTableSwitch) && opcode != byte(OpLookupSwitch) {
+		return nil, nil
+	}
+	// 计算对齐
+	pad := (4 - ((pos + 1) % 4)) % 4
+	idx := pos + 1 + pad
+	if idx+4 > len(codes) {
+		return nil, nil
+	}
+	defaultOffset := int(int32(codes[idx])<<24 | int32(codes[idx+1])<<16 | int32(codes[idx+2])<<8 | int32(codes[idx+3]))
+	targets = append(targets, pos+defaultOffset)
+	idx += 4
+	if opcode == byte(OpTableSwitch) {
+		if idx+8 > len(codes) {
+			return nil, nil
+		}
+		low := int(int32(codes[idx])<<24 | int32(codes[idx+1])<<16 | int32(codes[idx+2])<<8 | int32(codes[idx+3]))
+		high := int(int32(codes[idx+4])<<24 | int32(codes[idx+5])<<16 | int32(codes[idx+6])<<8 | int32(codes[idx+7]))
+		idx += 8
+		n := high - low + 1
+		for i := 0; i < n; i++ {
+			if idx+4 > len(codes) {
+				return nil, nil
+			}
+			offset := int(int32(codes[idx])<<24 | int32(codes[idx+1])<<16 | int32(codes[idx+2])<<8 | int32(codes[idx+3]))
+			targets = append(targets, pos+offset)
+			idx += 4
+		}
+	} else {
+		if idx+4 > len(codes) {
+			return nil, nil
+		}
+		npairs := int(int32(codes[idx])<<24 | int32(codes[idx+1])<<16 | int32(codes[idx+2])<<8 | int32(codes[idx+3]))
+		idx += 4
+		for i := 0; i < npairs; i++ {
+			if idx+8 > len(codes) {
+				return nil, nil
+			}
+			// 跳过match
+			idx += 4
+			offset := int(int32(codes[idx])<<24 | int32(codes[idx+1])<<16 | int32(codes[idx+2])<<8 | int32(codes[idx+3]))
+			targets = append(targets, pos+offset)
+			idx += 4
+		}
+	}
+	return targets, nil
+}
+
 // Instruction 表示一个 JVM 指令
 type Instruction struct {
 	Opcode   OpCode // 操作码

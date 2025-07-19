@@ -7,11 +7,12 @@ import (
 
 type CodeIterator struct {
 	Codes        []byte
-	Method       reflect.CtMethod
+	Method       *reflect.CtMethod
 	endPos       int
-	CodeAttr     classfile.CodeAttribute
+	CodeAttr     *classfile.CodeAttribute
 	currentPos   int
 	mark         int
+	mark2        int // 新增第二个mark
 	Instruction  []classfile.Instruction
 	ConstantPool []classfile.ConstantInfo //常量池
 }
@@ -23,10 +24,12 @@ type Gap struct {
 
 type SearchOption func(iterator *CodeIterator, index int) bool
 
-func NewCodeIterator(pool []classfile.ConstantInfo, code []byte) *CodeIterator {
+func NewCodeIterator(method *reflect.CtMethod, ca *classfile.CodeAttribute) *CodeIterator {
 	it := &CodeIterator{
-		ConstantPool: pool,
-		Codes:        code,
+		Method:       method,
+		ConstantPool: method.Class.GetConstPool().GetPool(),
+		Codes:        ca.Code,
+		CodeAttr:     ca,
 		Instruction:  make([]classfile.Instruction, 0),
 	}
 	it.parseCodes()
@@ -236,7 +239,7 @@ func (it *CodeIterator) Begin() {
 }
 
 // 获取当前CodeAttribute
-func (it *CodeIterator) Get() classfile.CodeAttribute {
+func (it *CodeIterator) Get() *classfile.CodeAttribute {
 	return it.CodeAttr
 }
 
@@ -245,15 +248,14 @@ func (it *CodeIterator) GetMark() int {
 	return it.mark
 }
 
-// 备用mark2
+// 获取备用mark2
 func (it *CodeIterator) GetMark2() int {
-	// TODO: 支持第二个mark
-	return 0
+	return it.mark2
 }
 
 // 设置备用mark2
 func (it *CodeIterator) SetMark2(mark int) {
-	// TODO: 支持第二个mark
+	it.mark2 = mark
 }
 
 // 返回有符号8位
@@ -340,46 +342,63 @@ func (it *CodeIterator) InsertAtPos(pos int, code []byte) {
 
 // 独占插入（排除块）
 func (it *CodeIterator) InsertEx(code []byte) int {
-	// TODO: 独占插入，暂同Insert
-	return it.Insert(code)
-}
-
-func (it *CodeIterator) InsertExAt(pos int, code []byte) int {
-	// TODO: 独占插入，暂同InsertAt
+	pos := it.currentPos
+	// 检查是否在gap区间（简单实现：gap为0x00连续区间）
+	for i := pos; i < pos+len(code) && i < len(it.Codes); i++ {
+		if it.Codes[i] == 0x00 {
+			return -1 // 在gap区间，不插入
+		}
+	}
 	it.InsertAt(pos, code)
 	return pos
 }
 
-// 在当前指令前插入gap
-func (it *CodeIterator) InsertGap(length int) int {
-	pos := it.currentPos
-	it.InsertGapAt(pos, length)
-	return pos
-}
-
-// 在指定位置插入gap
-func (it *CodeIterator) InsertGapAtPos(pos int, length int) int {
-	it.InsertGapAt(pos, length)
+func (it *CodeIterator) InsertExAt(pos int, code []byte) int {
+	// 检查是否在gap区间
+	for i := pos; i < pos+len(code) && i < len(it.Codes); i++ {
+		if it.Codes[i] == 0x00 {
+			return -1
+		}
+	}
+	it.InsertAt(pos, code)
 	return pos
 }
 
 // 独占gap插入
 func (it *CodeIterator) InsertExGap(length int) int {
-	// TODO: 独占gap插入，暂同InsertGap
-	return it.InsertGap(length)
+	pos := it.currentPos
+	// 检查是否在gap区间
+	for i := pos; i < pos+length && i < len(it.Codes); i++ {
+		if it.Codes[i] == 0x00 {
+			return -1
+		}
+	}
+	it.InsertGapAt(pos, length)
+	return pos
 }
 
 func (it *CodeIterator) InsertExGapAt(pos int, length int) int {
-	// TODO: 独占gap插入，暂同InsertGapAt
+	// 检查是否在gap区间
+	for i := pos; i < pos+length && i < len(it.Codes); i++ {
+		if it.Codes[i] == 0x00 {
+			return -1
+		}
+	}
 	it.InsertGapAt(pos, length)
 	return pos
 }
 
 // 支持inclusive/exclusive gap插入
 func (it *CodeIterator) InsertGapAtFull(pos int, length int, exclusive bool) Gap {
-	// TODO: 支持exclusive参数
-	it.InsertGapAt(pos, length)
-	return Gap{position: pos, length: length}
+	if exclusive {
+		// exclusive: gap插入在pos之后
+		it.InsertGapAt(pos+1, length)
+		return Gap{position: pos + 1, length: length}
+	} else {
+		// inclusive: gap插入在pos
+		it.InsertGapAt(pos, length)
+		return Gap{position: pos, length: length}
+	}
 }
 
 // 跳过构造器super/this调用，返回INVOKESPECIAL指令位置，未找到返回-1
@@ -479,4 +498,12 @@ func (it *CodeIterator) isThisConstructorInvoke(index int) bool {
 	// 假设有it.ThisClassName字段
 	return className == it.Method.Class.QualifiedName && it.isConstructorInvoke(index)
 	//return it.isConstructorInvoke(index) // 简化处理
+}
+
+func (it *CodeIterator) InstructionIndexToCodeOffset(idx int) int {
+	offset := 0
+	for i := 0; i < idx && i < len(it.Instruction); i++ {
+		offset += int(it.Instruction[i].Length())
+	}
+	return offset
 }

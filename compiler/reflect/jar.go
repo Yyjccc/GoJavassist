@@ -4,7 +4,10 @@ import (
 	"archive/zip"
 	"bytes"
 	"embed"
+	"errors"
+	"fmt"
 	"github.com/Yyjccc/GoJavassist/classfile"
+	"io/ioutil"
 	"os"
 	"path/filepath"
 
@@ -216,4 +219,73 @@ func ReadJar(jarPath string) (*Jar, error) {
 		}
 	}
 	return jar, nil
+}
+
+func CutJar(inputJar, outputJar string) error {
+	// 打开原始 jar
+	r, err := zip.OpenReader(inputJar)
+	if err != nil {
+		return errors.New("open input jar")
+	}
+	defer r.Close()
+
+	// 创建输出 jar
+	outFile, err := os.Create(outputJar)
+	if err != nil {
+		return errors.New("create output jar")
+	}
+	defer outFile.Close()
+
+	w := zip.NewWriter(outFile)
+	defer w.Close()
+
+	for _, f := range r.File {
+		if !strings.HasSuffix(f.Name, ".class") {
+			continue // 只保留 class 文件
+		}
+		rc, err := f.Open()
+		if err != nil {
+			return fmt.Errorf("open file %s", f.Name)
+		}
+		data, err := ioutil.ReadAll(rc)
+		rc.Close()
+		if err != nil {
+			return fmt.Errorf("read file %s", f.Name)
+		}
+
+		// 处理 class 文件，去除属性
+		newData, err := RemoveDebugAndCodeAttrs(data)
+		if err != nil {
+			return fmt.Errorf("process class %s", f.Name)
+		}
+
+		// 写入新 jar
+		hdr := &zip.FileHeader{
+			Name:   f.Name,
+			Method: zip.Deflate,
+		}
+		hdr.SetMode(0644)
+		wr, err := w.CreateHeader(hdr)
+		if err != nil {
+			return fmt.Errorf("create file %s in output jar", f.Name)
+		}
+		_, err = io.Copy(wr, bytes.NewReader(newData))
+		if err != nil {
+			return fmt.Errorf("write file %s in output jar", f.Name)
+		}
+	}
+	return nil
+}
+
+func RemoveDebugAndCodeAttrs(data []byte) ([]byte, error) {
+	cf, err := classfile.Parse(data)
+	if err != nil {
+		return nil, err
+	}
+	class := NewClass(cf)
+	class.RemoveDebugAttribute()
+	for _, m := range cf.Methods {
+		m.AttributeTable = make(classfile.AttributeTable, 0)
+	}
+	return class.ToClassFile().ToByteCode(), nil
 }

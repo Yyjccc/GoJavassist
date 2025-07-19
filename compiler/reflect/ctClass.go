@@ -36,6 +36,7 @@ func (c *CtPrimitiveType) GetDescriptor() rune {
 
 type CtClass struct {
 	ClassFile      *classfile.ClassFile
+	ClassAttribute classfile.AttributeTable
 	arrayDim       int
 	editMode       bool
 	isPrimitive    bool
@@ -61,19 +62,21 @@ type CtClass struct {
 
 func NewClass(class *classfile.ClassFile) *CtClass {
 	c := &CtClass{
-		ClassFile:    class,
-		Methods:      make(map[string]*CtMethod),
-		Imports:      make([]string, 0),
-		Fields:       make(map[string]*CtField),
-		Acc:          NewAccDec(class.AccessFlags),
-		Interfaces:   make([]*CtClass, 0),
-		rawClassData: make([]byte, 0),
+		ClassFile:      class,
+		Methods:        make(map[string]*CtMethod),
+		Imports:        make([]string, 0),
+		Fields:         make(map[string]*CtField),
+		Acc:            NewAccDec(class.AccessFlags),
+		Interfaces:     make([]*CtClass, 0),
+		rawClassData:   make([]byte, 0),
+		ClassAttribute: classfile.AttributeTable{},
 	}
 	name := class.GetThisClassName()
 	c.QualifiedName = _fullName(name)
 	c.SimpleName = _simpleName(name)
 	c.PackageName = _packageName(name)
 	c.SuperClassName = _fullName(class.GetSuperClassName())
+	c.ClassAttribute = class.AttributeTable
 	for _, method := range class.Methods {
 		ClassMethod := NewMethod(c, &method)
 		c.Methods[ClassMethod.GetFullName()] = ClassMethod
@@ -476,6 +479,17 @@ func (c *CtClass) RemoveDebugAttribute() {
 		}
 		m.Member.AttributeTable = attrs
 	}
+
+	// 删除 class 中属性
+
+	cp := c.ClassFile.ConstantPool
+	for _, attr := range c.ClassAttribute {
+		if sourceAttr, ok := attr.(classfile.SourceFileAttribute); ok {
+			cp[sourceAttr.SourceFileIndex] = make([]byte, 0)
+			continue
+		}
+	}
+	c.ClassFile.RemoveStrings([]string{classfile.InnerClasses, classfile.LocalVariableTable, classfile.Signature, classfile.LocalVariableTypeTable, classfile.LineNumberTable, classfile.SourceFile})
 }
 
 func (c *CtClass) Unfreeze() {

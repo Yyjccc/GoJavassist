@@ -22,7 +22,17 @@ func (v *FieldVisitor) SetInitStringValue(value string) error {
 		return fmt.Errorf(v.thisField.Name + " is not String type")
 	}
 	if v.thisField.Acc.Static {
-
+		methods := v.thisClass.GetDeclareMethods("<clinit>")
+		if len(methods) != 0 {
+			return fmt.Errorf("cannot find <init> method")
+		}
+		method := methods[0]
+		visitor := NewMethodVisitor(method)
+		src := fmt.Sprintf(`%s.%s="%s";`, v.thisClass.QualifiedName, v.thisField.Name, value)
+		err := visitor.InsertAfter(src)
+		if err != nil {
+			return err
+		}
 	} else {
 		methods := v.thisClass.GetDeclareMethods("<init>")
 		if len(methods) != 0 {
@@ -30,7 +40,11 @@ func (v *FieldVisitor) SetInitStringValue(value string) error {
 		}
 		method := methods[0]
 		visitor := NewMethodVisitor(method)
-		fmt.Println(visitor)
+		src := fmt.Sprintf(`this.%s="%s";`, v.thisField.Name, value)
+		err := visitor.InsertAfter(src)
+		if err != nil {
+			return err
+		}
 	}
 	return nil
 

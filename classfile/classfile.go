@@ -256,6 +256,24 @@ func (cf *ClassFile) GetFieldNames() []string {
 	return res
 }
 
+func (cf *ClassFile) RemoveStrings(strList []string) {
+	// 构建map 快速索引
+	set := make(map[string]struct{}, len(strList))
+	for _, s := range strList {
+		set[s] = struct{}{}
+	}
+	cp := cf.ConstantPool
+	for index, info := range cf.ConstantPool {
+		if bytes, ok := info.([]byte); ok {
+			name := string(bytes)
+			if _, ok := set[name]; ok {
+				cp[index] = make([]byte, 0)
+			}
+		}
+	}
+	cf.ConstantPool = cp
+}
+
 func NewClassFile() *ClassFile {
 	return &ClassFile{
 		MajorVersion:   52,
